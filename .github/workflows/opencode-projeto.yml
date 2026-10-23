@@ -1,12 +1,13 @@
 name: Naruto RPG - OpenCode (Projeto)
 
 on:
-  push:
-    branches: [Projeto]
-    paths:
-      - .github/workflows/opencode-projeto.yml
-      - scripts/naruto_*.py
   workflow_dispatch:
+    inputs:
+      model:
+        description: "Modelo OpenAI disponivel no seu ChatGPT Plus (validado apos login)"
+        required: true
+        default: "openai/gpt-5.4"
+        type: string
 
 permissions:
   contents: read
@@ -20,12 +21,19 @@ jobs:
     if: github.ref == 'refs/heads/Projeto'
     name: Verificar MCP e acesso autorizado ao Naruto Project
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     env:
       OPENCODE_DISABLE_AUTOUPDATE: "true"
     steps:
       - name: Definir caminhos de evidencia no runner
         run: |
+          # Sessao OAuth isolada, fora da pasta enviada como artefato.
+          mkdir -p "$RUNNER_TEMP/naruto-chatgpt-auth"
+          chmod 700 "$RUNNER_TEMP/naruto-chatgpt-auth"
+          echo "XDG_DATA_HOME=$RUNNER_TEMP/naruto-chatgpt-auth/data" >> "$GITHUB_ENV"
+          echo "XDG_CONFIG_HOME=$RUNNER_TEMP/naruto-chatgpt-auth/config" >> "$GITHUB_ENV"
+          echo "XDG_CACHE_HOME=$RUNNER_TEMP/naruto-chatgpt-auth/cache" >> "$GITHUB_ENV"
+          echo "XDG_STATE_HOME=$RUNNER_TEMP/naruto-chatgpt-auth/state" >> "$GITHUB_ENV"
           echo "OPENCODE_CONFIG=$RUNNER_TEMP/naruto-opencode.json" >> "$GITHUB_ENV"
           echo "RPG_ACTION_MARKER=$RUNNER_TEMP/naruto-action-reserved" >> "$GITHUB_ENV"
           echo "RPG_AUDIT_PATH=$RUNNER_TEMP/naruto-evidence/naruto-audit.jsonl" >> "$GITHUB_ENV"
@@ -74,6 +82,30 @@ jobs:
           rows = [json.loads(line) for line in Path(os.environ['RPG_AUDIT_PATH']).read_text().splitlines()]
           assert any(r['phase'] == 'opencode_discovery' and r['tool'] == 'list_tools' for r in rows), 'OpenCode nao descobriu ferramentas'
           PY
+      - name: Conectar ChatGPT Plus por link e codigo (aguarda ate 10 minutos)
+        timeout-minutes: 11
+        run: |
+          echo "Abra https://auth.openai.com/codex/device no seu navegador."
+          echo "Use o codigo exibido abaixo pelo OpenCode e autorize sua conta ChatGPT Plus."
+          echo "Se necessario, habilite login por codigo de dispositivo nas configuracoes de seguranca do ChatGPT."
+          echo "Esta sessao vale somente para esta execucao; nenhum token sera publicado."
+          printf '## Login ChatGPT Plus\nAbra o step **Conectar ChatGPT Plus por link e codigo** nos logs desta execucao. Use o link oficial e o codigo temporario exibidos pelo OpenCode. A espera termina em 10 minutos.\n' >> "$GITHUB_STEP_SUMMARY"
+          timeout 600 opencode auth login --provider openai --method 'ChatGPT Pro/Plus (headless)'
+      - name: Validar modelo da assinatura apos login
+        env:
+          RPG_MODEL: ${{ inputs.model }}
+        run: |
+          timeout 120 opencode models openai > "$RUNNER_TEMP/naruto-evidence/modelos-chatgpt.txt"
+          python - <<'PY'
+          import os, re
+          from pathlib import Path
+          selected = os.environ['RPG_MODEL']
+          assert re.fullmatch(r'openai/[A-Za-z0-9._-]+', selected), 'Selecione um modelo openai/<nome>'
+          path = Path(os.environ['RUNNER_TEMP']) / 'naruto-evidence/modelos-chatgpt.txt'
+          available = {re.sub(r'\x1b\[[0-9;]*m', '', line).strip() for line in path.read_text().splitlines()}
+          assert selected in available, 'Modelo indisponivel nesta sessao; confira modelos-chatgpt.txt e escolha outro modelo OpenAI'
+          print('Modelo da assinatura encontrado:', selected)
+          PY
       - name: Diagnosticar conta autorizada independentemente do modelo
         env:
           RPG_PHASE: discord_probe
@@ -83,12 +115,10 @@ jobs:
         env:
           RPG_PHASE: opencode_action
           RPG_MODE: jogar
-          RPG_MODEL: ${{ vars.RPG_MODEL || 'opencode/big-pickle' }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          RPG_MODEL: ${{ inputs.model }}
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
         run: |
-          timeout 180 opencode run --format json --agent build --model "$RPG_MODEL" 'Use somente ferramentas naruto. Chame naruto_status_rpg {}. Se conectado ao Naruto Project, chame naruto_read_messages {} e naruto_list_application_commands {}. Se mission_command_available for true, chame naruto_consult_missions {} exatamente UMA vez. Nunca repita apos erro ou timeout. Relate comando tentado, enviado e resposta comprovada separadamente. Nao invente estado do RPG. Pare se login, provedor ou acesso falhar.' > "$RUNNER_TEMP/naruto-evidence/opencode.jsonl" 2> "$RUNNER_TEMP/naruto-evidence/opencode.stderr"
+          timeout 300 opencode run --format json --agent build --model "$RPG_MODEL" 'Use somente ferramentas naruto. Chame naruto_status_rpg {}. Se conectado ao Naruto Project, chame naruto_read_messages {} e naruto_list_application_commands {}. Se mission_command_available for true, chame naruto_consult_missions {} exatamente UMA vez. Nunca repita apos erro ou timeout. Relate comando tentado, enviado e resposta comprovada separadamente. Nao invente estado do RPG. Pare se login, provedor ou acesso falhar.' > "$RUNNER_TEMP/naruto-evidence/opencode.jsonl" 2> "$RUNNER_TEMP/naruto-evidence/opencode.stderr"
       - name: Validar evidencia e distinguir bloqueio de jogada concluida
         if: always()
         run: |
@@ -132,3 +162,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: ${{ runner.temp }}/naruto-evidence/
+      - name: Apagar sessao temporaria do ChatGPT
+        if: always()
+        run: |
+          # Caminho fixo no runner; nunca imprimir ou enviar arquivos de credenciais.
+          rm -rf -- "$RUNNER_TEMP/naruto-chatgpt-auth"
