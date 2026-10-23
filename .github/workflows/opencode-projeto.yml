@@ -27,6 +27,7 @@ jobs:
       - name: Definir caminhos de evidencia no runner
         run: |
           echo "OPENCODE_CONFIG=$RUNNER_TEMP/naruto-opencode.json" >> "$GITHUB_ENV"
+          echo "RPG_ACTION_MARKER=$RUNNER_TEMP/naruto-action-reserved" >> "$GITHUB_ENV"
           echo "RPG_AUDIT_PATH=$RUNNER_TEMP/naruto-evidence/naruto-audit.jsonl" >> "$GITHUB_ENV"
       - name: Baixar branch Projeto
         uses: actions/checkout@v4
@@ -41,7 +42,7 @@ jobs:
           node-version: "22"
       - name: Instalar somente dependencias oficiais do diagnostico
         run: |
-          python -m pip install --disable-pip-version-check 'mcp==1.30.0' 'httpx==0.28.1'
+          python -m pip install --disable-pip-version-check 'mcp==1.30.0' 'httpx==0.28.1' 'discord.py-self==2.1.0'
           npm install --global opencode-ai@1.19.4
           opencode --version
           mkdir -p "$RUNNER_TEMP/naruto-evidence"
@@ -73,17 +74,19 @@ jobs:
           rows = [json.loads(line) for line in Path(os.environ['RPG_AUDIT_PATH']).read_text().splitlines()]
           assert any(r['phase'] == 'opencode_discovery' and r['tool'] == 'list_tools' for r in rows), 'OpenCode nao descobriu ferramentas'
           PY
-      - name: Diagnosticar autenticacao oficial independentemente do modelo
+      - name: Diagnosticar conta autorizada independentemente do modelo
         env:
           RPG_PHASE: discord_probe
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
         run: python scripts/naruto_mcp_probe.py > "$RUNNER_TEMP/naruto-evidence/discord.json" 2> "$RUNNER_TEMP/naruto-evidence/discord.stderr"
-      - name: OpenCode chama status real da integracao autorizada
+      - name: OpenCode tenta uma consulta de missoes com evidencia
         env:
           RPG_PHASE: opencode_action
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          RPG_MODE: jogar
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
         run: |
-          timeout 180 opencode run --format json --agent build --model opencode/big-pickle 'Chame a ferramenta naruto_status_rpg com {} exatamente uma vez. Relate o resultado real e pare. Nao execute outras ferramentas. Nao afirme que Henrique jogou. Se bloqueado, registre o bloqueio.' > "$RUNNER_TEMP/naruto-evidence/opencode.jsonl" 2> "$RUNNER_TEMP/naruto-evidence/opencode.stderr"
+          timeout 180 opencode run --format json --agent build --model opencode/big-pickle 'Use somente ferramentas naruto. Chame naruto_status_rpg {}. Se conectado ao Naruto Project, chame naruto_read_messages {} e naruto_list_application_commands {}. Se mission_command_available for true, chame naruto_consult_missions {} exatamente UMA vez. Nunca repita apos erro ou timeout. Relate comando tentado, enviado e resposta comprovada separadamente. Nao invente estado do RPG. Pare se login, provedor ou acesso falhar.' > "$RUNNER_TEMP/naruto-evidence/opencode.jsonl" 2> "$RUNNER_TEMP/naruto-evidence/opencode.stderr"
       - name: Validar evidencia e distinguir bloqueio de jogada concluida
         if: always()
         run: |
@@ -97,13 +100,18 @@ jobs:
           events_path = Path(os.environ['RUNNER_TEMP']) / 'naruto-evidence/opencode.jsonl'
           events = [json.loads(line) for line in events_path.read_text().splitlines() if line.strip()] if events_path.exists() else []
           errors = [e.get('error', {}).get('data', {}) for e in events if e.get('type') == 'error']
+          actions = [r for r in rows if r['tool'] == 'consult_missions']
+          action = actions[-1]['evidence'] if actions else {}
           summary = {'mcp_started': any(r['tool'] == 'process' for r in rows),
                      'opencode_discovered_tools': any(r['phase'] == 'opencode_discovery' and r['tool'] == 'list_tools' for r in rows),
                      'opencode_called_status': len(calls) == 1,
                      'evidence': calls[-1]['evidence'] if calls else None,
                      'discord_diagnostic': diagnostic[-1]['evidence'] if diagnostic else None,
                      'model_errors': [{'message': e.get('message'), 'http_status': e.get('statusCode')} for e in errors],
-                     'command_sent': False, 'command_completed': False, 'rpg_state_verified': False}
+                     'action_evidence': action,
+                     'command_sent': action.get('command_sent', False),
+                     'command_completed': action.get('command_completed', False),
+                     'rpg_state_verified': action.get('rpg_state_verified', False)}
           text = json.dumps(summary, ensure_ascii=False, indent=2)
           (Path(os.environ['RUNNER_TEMP']) / 'naruto-evidence/resultado.json').write_text(text)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
@@ -111,7 +119,8 @@ jobs:
           assert summary['mcp_started'], 'MCP nao iniciou'
           assert summary['opencode_discovered_tools'], 'OpenCode nao descobriu ferramentas'
           assert summary['opencode_called_status'], 'OpenCode nao chamou status exatamente uma vez'
-          raise SystemExit('BLOQUEADO: nenhuma jogada executada. Consulte resultado.json para autenticacao/acesso e integracao autorizada do Naruto Bot.')
+          assert summary['command_completed'], 'BLOQUEADO: nenhuma resposta correlacionada ao comando; consulte resultado.json'
+          assert summary['rpg_state_verified'], 'Resposta capturada; estado do RPG ainda requer conferencia do conteudo real'
           PY
       - name: Publicar evidencia inclusive erros
         if: always()

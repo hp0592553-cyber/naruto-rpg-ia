@@ -1,99 +1,208 @@
 #!/usr/bin/env python3
-"""MCP stdio restrito: apenas API oficial de bot, nunca token de usuario."""
+"""MCP restrito ao Naruto Project; sem solver CAPTCHA ou ferramentas genericas."""
 import asyncio
+import inspect
 import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
+import discord
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-GUILD_ID = "1515877468299595919"
-CHANNEL_ID = "1520114348079583263"
-NARUTO_BOT_ID = "1515908078913192026"
-app = Server("naruto-rpg-guardado")
+GUILD_ID = 1515877468299595919
+CHANNEL_ID = 1520114348079583263
+NARUTO_BOT_ID = 1515908078913192026
+app = Server('naruto-rpg-guardado')
+class RestrictedClient(discord.Client):
+    receiver = None
+
+    async def on_message(self, message):
+        if self.receiver:
+            await self.receiver(message)
+
+
+client = RestrictedClient()
+connection = None
+channel = None
+commands = []
+state = {'character_connected': False, 'command_attempted': False, 'command_sent': False,
+         'command_completed': False, 'rpg_state_verified': False}
 
 
 def audit(tool, outcome, **details):
-    path = os.getenv("RPG_AUDIT_PATH")
+    path = os.getenv('RPG_AUDIT_PATH')
     if path:
-        with Path(path).open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"time": datetime.now(timezone.utc).isoformat(),
-                                     "phase": os.getenv("RPG_PHASE", "unknown"),
-                                     "tool": tool, "outcome": outcome, **details}) + "\n")
+        with Path(path).open('a', encoding='utf-8') as handle:
+            handle.write(json.dumps({'time': datetime.now(timezone.utc).isoformat(),
+                'phase': os.getenv('RPG_PHASE', 'unknown'), 'tool': tool, 'outcome': outcome, **details}, ensure_ascii=False) + '\n')
+
+
+def safe_error(exc):
+    # Nunca registrar str(exc): respostas HTTP podem conter dados de autenticacao.
+    return {'error_type': type(exc).__name__, 'http_status': getattr(exc, 'status', None)}
 
 
 def reply(data):
-    return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False))]
+    return [TextContent(type='text', text=json.dumps(data, ensure_ascii=False))]
+
+
+async def collect(value):
+    if inspect.isawaitable(value):
+        value = await value
+    return [item async for item in value] if hasattr(value, '__aiter__') else list(value)
+
+
+async def status():
+    global connection, channel
+    token = os.getenv('DISCORD_USER_TOKEN', '')
+    if not token:
+        return {**state, 'status': 'blocked_missing_user_token'}
+    if connection is None:
+        # Sem reconexao automatica, resolucao de CAPTCHA ou login alternativo.
+        connection = asyncio.create_task(client.start(token, reconnect=False))
+        for _ in range(120):
+            if connection.done():
+                try:
+                    connection.result()
+                except Exception as exc:
+                    return {**state, 'status': 'discord_login_failed', **safe_error(exc)}
+                return {**state, 'status': 'discord_disconnected'}
+            if client.is_ready():
+                break
+            await asyncio.sleep(0.5)
+    if not client.is_ready():
+        return {**state, 'status': 'discord_not_ready'}
+    if getattr(client.user, 'bot', False):
+        return {**state, 'status': 'wrong_identity_bot'}
+    guild = client.get_guild(GUILD_ID)
+    if guild is None:
+        return {**state, 'status': 'guild_not_accessible', 'account_id': str(client.user.id)}
+    try:
+        channel = client.get_channel(CHANNEL_ID) or await client.fetch_channel(CHANNEL_ID)
+    except Exception as exc:
+        return {**state, 'status': 'channel_not_accessible', **safe_error(exc)}
+    if getattr(getattr(channel, 'guild', None), 'id', None) != GUILD_ID:
+        return {**state, 'status': 'wrong_guild'}
+    member = guild.get_member(client.user.id)
+    name = getattr(member, 'display_name', '')
+    # O apelido e evidencia de identidade declarada; nao comprova estado do RPG.
+    state.update(character_connected=True, account_id=str(client.user.id), guild_id=str(GUILD_ID),
+                 channel_id=str(CHANNEL_ID), guild_accessed=True, channel_accessed=True, display_name=name)
+    return {**state, 'status': 'connected'}
+
+
+def message_data(message):
+    return {'message_id': str(message.id), 'author_id': str(message.author.id),
+            'channel_id': str(message.channel.id), 'content': message.content,
+            'embeds': [embed.to_dict() for embed in message.embeds],
+            'ephemeral': bool(getattr(message.flags, 'ephemeral', False))}
 
 
 @app.list_tools()
 async def list_tools():
-    audit("list_tools", "ok")
-    return [Tool(name="status_rpg", description="Diagnostica autenticacao oficial de bot e acesso ao canal; nao joga como Henrique.",
-                 inputSchema={"type": "object", "properties": {}, "additionalProperties": False})]
+    audit('list_tools', 'ok')
+    descriptions = {'status_rpg': 'Verifica login da conta autorizada, servidor e canal exatos.',
+                    'read_messages': 'Le ate 12 mensagens do canal fixo Naruto Project.',
+                    'list_application_commands': 'Descobre comandos do Naruto Bot no canal fixo.',
+                    'consult_missions': 'Tenta UMA /missoes minhas e aguarda resposta correlacionada. Nunca repetir.'}
+    return [Tool(name=name, description=description, inputSchema={'type': 'object', 'properties': {}, 'additionalProperties': False})
+            for name, description in descriptions.items()]
 
 
-async def status():
-    result = {"character_connected": False, "command_sent": False,
-              "command_completed": False, "rpg_state_verified": False,
-              "guild_id": GUILD_ID, "channel_id": CHANNEL_ID,
-              "integration": "official_bot_read_only", "slash_execution": "blocked_no_authorized_naruto_api"}
-    token = os.getenv("DISCORD_BOT_TOKEN", "")
-    if not token:
-        return {**result, "status": "blocked_missing_bot_token",
-                "reason": "DISCORD_USER_TOKEN nao e utilizado. Necessario bot oficial e integracao autorizada pelo Naruto Bot para agir como Henrique."}
-    # Somente autenticacao Bot. Nunca fazer fallback para token de usuario.
-    async with httpx.AsyncClient(base_url="https://discord.com/api/v10", timeout=20,
-                                 headers={"Authorization": "Bot " + token}) as client:
-        for stage, path in [("identity", "/users/@me"), ("guild", f"/guilds/{GUILD_ID}"),
-                            ("channel", f"/channels/{CHANNEL_ID}"),
-                            ("history", f"/channels/{CHANNEL_ID}/messages?limit=12")]:
+async def discover():
+    global commands
+    commands = [cmd for cmd in await collect(channel.application_commands())
+                if isinstance(cmd, discord.SlashCommand) and cmd.application_id == NARUTO_BOT_ID]
+    roots = [c for c in commands if c.name == 'missoes']
+    scoped = [c for c in roots if getattr(c, 'guild_id', None) == GUILD_ID]
+    roots = scoped or roots
+    if len(roots) != 1:
+        return None
+    return next((c for c in roots[0].children if c.name == 'minhas'), None)
+
+
+async def consult():
+    if state['command_attempted']:
+        return {**state, 'status': 'blocked_already_attempted'}
+    command = await discover()
+    if command is None:
+        return {**state, 'status': 'command_not_found'}
+    if os.getenv('RPG_MODE') != 'jogar':
+        return {**state, 'status': 'blocked_read_only'}
+    marker = Path(os.environ['RPG_ACTION_MARKER'])
+    try:
+        with marker.open('x') as handle:
+            handle.write('reserved /missoes minhas\n')
+    except FileExistsError:
+        return {**state, 'status': 'blocked_run_already_attempted'}
+    state['command_attempted'] = True
+    audit('command_attempt', 'reserved', command='missoes minhas')
+    # O listener existe antes do envio. Mensagem anterior ou de outro usuario nao conta.
+    received = asyncio.Queue()
+    baseline = discord.utils.time_snowflake(datetime.now(timezone.utc))
+    async def on_message(message):
+        if message.channel.id == CHANNEL_ID and message.author.id == NARUTO_BOT_ID and message.id > baseline:
+            await received.put(message)
+    client.receiver = on_message
+    try:
+        interaction = await asyncio.wait_for(command(channel), timeout=45)
+        interaction_id = getattr(interaction, 'id', None)
+        state.update(command_sent=True, interaction_id=str(interaction_id) if interaction_id else None)
+        audit('command_send', 'submitted', evidence=dict(state))
+        deadline = asyncio.get_running_loop().time() + 35
+        while asyncio.get_running_loop().time() < deadline:
+            remaining = deadline - asyncio.get_running_loop().time()
             try:
-                response = await client.get(path)
-            except httpx.HTTPError as exc:
-                return {**result, "status": "network_error", "stage": stage, "error_type": type(exc).__name__}
-            if response.status_code != 200:
-                return {**result, "status": "discord_http_error", "stage": stage, "http_status": response.status_code}
-            data = response.json()
-            if stage == "identity":
-                if data.get("bot") is not True:
-                    return {**result, "status": "blocked_non_bot_identity"}
-                result["bot_authenticated"] = True
-                result["bot_id"] = data["id"]
-            elif stage == "guild":
-                if str(data.get("id")) != GUILD_ID:
-                    return {**result, "status": "wrong_guild"}
-                result["guild_accessed"] = True
-            elif stage == "channel":
-                if str(data.get("guild_id")) != GUILD_ID or str(data.get("id")) != CHANNEL_ID:
-                    return {**result, "status": "wrong_channel"}
-                result["channel_accessed"] = True
-            else:
-                result["history_read"] = True
-                # IDs sao evidencia de leitura; mensagens antigas nao comprovam uma nova jogada.
-                result["observed_naruto_message_ids"] = [m["id"] for m in data if str(m.get("author", {}).get("id")) == NARUTO_BOT_ID]
-    return {**result, "status": "blocked_no_authorized_naruto_api"}
+                msg = await asyncio.wait_for(received.get(), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+            metadata = getattr(msg, 'interaction', None) or getattr(msg, 'interaction_metadata', None)
+            if interaction_id and getattr(metadata, 'id', None) == interaction_id:
+                state.update(command_completed=True, response=message_data(msg))
+                # Conteudo capturado e verificavel; nao inferir XP/nivel automaticamente.
+                return {**state, 'status': 'response_received', 'rpg_state_verified': False}
+        return {**state, 'status': 'submitted_response_not_correlated'}
+    finally:
+        client.receiver = None
 
 
 @app.call_tool()
 async def call_tool(name, arguments):
-    if name != "status_rpg" or arguments:
-        audit("invalid_call", "denied")
-        return reply({"status": "denied"})
-    result = await status()
-    audit(name, result["status"], evidence=result)
-    return reply(result)
+    if arguments or name not in {'status_rpg', 'read_messages', 'list_application_commands', 'consult_missions'}:
+        return reply({'status': 'denied'})
+    try:
+        result = await status()
+        if result['status'] == 'connected':
+            if name == 'read_messages':
+                result = {**state, 'status': 'history_read', 'messages': [message_data(m) async for m in channel.history(limit=12)]}
+            elif name == 'list_application_commands':
+                target = await discover()
+                result = {**state, 'status': 'commands_discovered', 'mission_command_available': target is not None,
+                          'commands': [{'name': c.name, 'id': str(c.id), 'application_id': str(c.application_id)} for c in commands]}
+            elif name == 'consult_missions':
+                result = await consult()
+        audit(name, result['status'], evidence=result)
+        return reply(result)
+    except Exception as exc:
+        result = {**state, 'status': 'tool_failed', **safe_error(exc)}
+        audit(name, result['status'], evidence=result)
+        return reply(result)
 
 
 async def run():
-    audit("process", "started")
-    async with stdio_server() as (reader, writer):
-        await app.run(reader, writer, app.create_initialization_options())
+    audit('process', 'started')
+    try:
+        async with stdio_server() as (reader, writer):
+            await app.run(reader, writer, app.create_initialization_options())
+    finally:
+        await client.close()
+        if connection:
+            connection.cancel()
+            await asyncio.gather(connection, return_exceptions=True)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(run())

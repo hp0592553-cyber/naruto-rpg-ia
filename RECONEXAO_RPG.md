@@ -50,3 +50,15 @@ Execucao 39963215666: rejeitada antes de criar jobs por contexto runner usado em
 Execucao 39963303788 (f98c537), artefato 12505801160: configuracao carregada, probe stdio e descoberta MCP pelo OpenCode passaram. O artefato resultado.json confirma mcp_started=true e opencode_discovered_tools=true. Modelo big-pickle retornou HTTP 403 FreeTierError tambem no Actions; nenhuma chamada do modelo ao status. O secret DISCORD_BOT_TOKEN chegou vazio. Nenhuma autenticacao Discord foi tentada.
 
 O workflow agora faz um probe oficial separado antes do modelo e inclui model_errors e discord_diagnostic no resultado, para preservar ambos os bloqueios. A chave de um provedor de IA e o token Discord sao credenciais distintas. O provedor precisa permitir o modelo neste ambiente; nao houve troca de identidade ou tentativa de contornar o 403.
+
+## Instrucao posterior: conta pessoal autorizada pelo usuario
+
+O usuario substituiu expressamente sua restricao anterior a self-bot e informou ter atualizado DISCORD_USER_TOKEN. O workflow passa a usar esse secret para o teste solicitado; as notas anteriores de bot oficial descrevem a revisao anterior, nao a configuracao atual. Isso nao altera as regras externas do Discord.
+
+O MCP usa somente discord.py-self 2.1.0, sem importar o cliente amplo do repositorio, solver CAPTCHA, navegador ou ferramentas genericas. O processo inicia sem token, e o login e adiado ate a chamada de status. O transporte e a descoberta continuam testaveis independentemente da autenticacao. Sem reconexao automatica ou fallback de autenticacao.
+
+Escopo atual: servidor 1515877468299595919, canal 1520114348079583263, aplicativo 1515908078913192026 e uma tentativa de /missoes minhas. Uma reserva exclusiva em arquivo impede repetir a tentativa entre processos da mesma execucao, inclusive apos timeout. Uma resposta so e marcada concluida se autor, canal, tempo e ID da interacao corresponderem; o conteudo e capturado integralmente com embeds, sem inferir XP ou nivel. O estado do RPG permanece nao verificado ate conferencia desse conteudo.
+
+A credencial OPENCODE_API_KEY, quando configurada no GitHub, e disponibilizada somente ao step do modelo, separada de DISCORD_USER_TOKEN. Nenhuma credencial e escrita na configuracao ou nos commits. Erros sao registrados por tipo e status HTTP sem texto bruto de autenticacao.
+
+Testes locais: initialize/tools-list/tools-call sem token passaram; teste simulado confirmou bloqueio de segunda tentativa apos timeout e reserva persistente entre estados, sem acesso ao Discord. Teste real com token ocorre somente no Actions.

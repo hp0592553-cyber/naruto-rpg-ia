@@ -16,10 +16,15 @@ async def main():
             initialized = await session.initialize()
             definitions = await session.list_tools()
             names = [tool.name for tool in definitions.tools]
-            assert names == ["status_rpg"], names
+            assert set(names) == {"status_rpg", "read_messages", "list_application_commands", "consult_missions"}, names
             result = await session.call_tool("status_rpg", {})
             assert not result.isError, result
             evidence = json.loads(result.content[0].text)
+            if evidence.get("status") == "connected":
+                for name in ("read_messages", "list_application_commands"):
+                    output = await session.call_tool(name, {})
+                    assert not output.isError
+                    print(json.dumps({"tool": name, "result": json.loads(output.content[0].text)}))
             print(json.dumps({"initialize": initialized.serverInfo.name, "tools": names, "evidence": evidence}))
 
 
