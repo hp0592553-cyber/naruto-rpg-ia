@@ -8,8 +8,13 @@ on:
       model:
         description: "Modelo OpenAI disponivel no seu ChatGPT Plus (validado apos login)"
         required: true
-        default: "openai/gpt-5.4"
+        default: "openai/gpt-6.1-sol"
         type: string
+      renew_login:
+        description: "Ignorar sessao salva e gerar novo link de login"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -52,7 +57,7 @@ jobs:
           node-version: "22"
       - name: Instalar somente dependencias oficiais do diagnostico
         run: |
-          python -m pip install --disable-pip-version-check 'mcp==1.30.0' 'httpx==0.28.1' 'discord.py-self==2.1.0'
+          python -m pip install --disable-pip-version-check 'mcp==1.30.0' 'httpx==0.28.1' 'discord.py-self==2.1.0' 'cryptography==46.0.3'
           npm install --global opencode-ai@1.19.4
           opencode --version
           mkdir -p "$RUNNER_TEMP/naruto-evidence"
@@ -84,18 +89,76 @@ jobs:
           rows = [json.loads(line) for line in Path(os.environ['RPG_AUDIT_PATH']).read_text().splitlines()]
           assert any(r['phase'] == 'opencode_discovery' and r['tool'] == 'list_tools' for r in rows), 'OpenCode nao descobriu ferramentas'
           PY
+      - name: Preparar persistencia criptografada do login
+        id: auth_cache
+        env:
+          CHATGPT_CACHE_KEY: ${{ secrets.CHATGPT_CACHE_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          enabled = len(os.environ.get('CHATGPT_CACHE_KEY', '')) >= 32
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"enabled={str(enabled).lower()}\n")
+          Path(os.environ['RUNNER_TEMP'], 'naruto-auth-cache').mkdir(mode=0o700, exist_ok=True)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('## Persistencia do login\n' + ('Cache criptografado habilitado.\n' if enabled else 'Cache desativado: crie o secret CHATGPT_CACHE_KEY com 32 ou mais caracteres aleatorios em Settings → Secrets and variables → Actions. Nao e uma chave de API.\n'))
+          if not enabled:
+              print('Login sem persistencia: configure CHATGPT_CACHE_KEY com 32 ou mais caracteres aleatorios para ativar cache criptografado. Nao e uma chave de API.')
+          PY
+      - name: Restaurar somente cache criptografado
+        id: restore_auth
+        if: steps.auth_cache.outputs.enabled == 'true' && inputs.renew_login != true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/naruto-auth-cache/session.enc
+          key: chatgpt-oauth-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            chatgpt-oauth-v1-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Abrir sessao criptografada no runner temporario
+        id: restored_session
+        if: steps.auth_cache.outputs.enabled == 'true' && steps.restore_auth.outputs.cache-matched-key != ''
+        env:
+          CHATGPT_CACHE_KEY: ${{ secrets.CHATGPT_CACHE_KEY }}
+        run: |
+          python - <<'PY'
+          import base64, io, os, shutil, tarfile
+          from pathlib import Path
+          from cryptography.fernet import Fernet, InvalidToken
+          from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+          tmp = Path(os.environ['RUNNER_TEMP'])
+          root = tmp / 'naruto-chatgpt-auth'
+          ready = False
+          try:
+              blob = (tmp / 'naruto-auth-cache/session.enc').read_bytes()
+              if blob[:16] != b'NARUTO-OAUTH-V1!':
+                  raise ValueError('Formato desconhecido')
+              key = Scrypt(salt=blob[16:32], length=32, n=16384, r=8, p=1).derive(os.environ['CHATGPT_CACHE_KEY'].encode())
+              payload = Fernet(base64.urlsafe_b64encode(key)).decrypt(blob[32:])
+              with tarfile.open(fileobj=io.BytesIO(payload), mode='r:gz') as archive:
+                  archive.extractall(root, filter='data')
+              ready = True
+              print('Sessao restaurada de cache autenticado e criptografado; o OpenCode validara/renovara o login ao usar o modelo.')
+          except (InvalidToken, ValueError, OSError, tarfile.TarError):
+              shutil.rmtree(root, ignore_errors=True)
+              root.mkdir(mode=0o700)
+              print('Cache indisponivel, invalido ou chave alterada: sera necessario novo login por link.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"ready={str(ready).lower()}\n")
+          PY
       - name: Conectar ChatGPT Plus por link e codigo (aguarda ate 10 minutos)
+        id: chatgpt_login
+        if: steps.restored_session.outputs.ready != 'true'
         timeout-minutes: 11
         run: |
           echo "Abra https://auth.openai.com/codex/device no seu navegador."
           echo "Use o codigo exibido abaixo pelo OpenCode e autorize sua conta ChatGPT Plus."
           echo "Se necessario, habilite login por codigo de dispositivo nas configuracoes de seguranca do ChatGPT."
-          echo "Esta sessao vale somente para esta execucao; nenhum token sera publicado."
-          printf '## Login ChatGPT Plus\nAbra o step **Conectar ChatGPT Plus por link e codigo** nos logs desta execucao. Use o link oficial e o codigo temporario exibidos pelo OpenCode. A espera termina em 10 minutos.\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '## Login ChatGPT Plus\nAbra o step **Conectar ChatGPT Plus por link e codigo** nos logs desta execucao e autorize com o codigo temporario. Com CHATGPT_CACHE_KEY configurado, a sessao sera salva criptografada.\n' >> "$GITHUB_STEP_SUMMARY"
           timeout 600 opencode auth login --provider openai --method 'ChatGPT Pro/Plus (headless)'
       - name: Validar modelo da assinatura apos login
         env:
-          RPG_MODEL: ${{ inputs.model || 'openai/gpt-5.4' }}
+          RPG_MODEL: ${{ inputs.model || 'openai/gpt-6.1-sol' }}
         run: |
           timeout 120 opencode models openai > "$RUNNER_TEMP/naruto-evidence/modelos-chatgpt.txt"
           python - <<'PY'
@@ -117,7 +180,7 @@ jobs:
         env:
           RPG_PHASE: opencode_action
           RPG_MODE: jogar
-          RPG_MODEL: ${{ inputs.model || 'openai/gpt-5.4' }}
+          RPG_MODEL: ${{ inputs.model || 'openai/gpt-6.1-sol' }}
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
         run: |
           timeout 300 opencode run --format json --agent build --model "$RPG_MODEL" 'Use somente ferramentas naruto. Chame naruto_status_rpg {}. Se conectado ao Naruto Project, chame naruto_read_messages {} e naruto_list_application_commands {}. Se mission_command_available for true, chame naruto_consult_missions {} exatamente UMA vez. Nunca repita apos erro ou timeout. Relate comando tentado, enviado e resposta comprovada separadamente. Nao invente estado do RPG. Pare se login, provedor ou acesso falhar.' > "$RUNNER_TEMP/naruto-evidence/opencode.jsonl" 2> "$RUNNER_TEMP/naruto-evidence/opencode.stderr"
@@ -164,6 +227,41 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: ${{ runner.temp }}/naruto-evidence/
+      - name: Criptografar sessao atualizada antes de limpar o runner
+        id: encrypted_session
+        if: always() && steps.auth_cache.outputs.enabled == 'true' && (steps.chatgpt_login.outcome == 'success' || steps.restored_session.outputs.ready == 'true')
+        env:
+          CHATGPT_CACHE_KEY: ${{ secrets.CHATGPT_CACHE_KEY }}
+        run: |
+          python - <<'PY'
+          import base64, io, os, tarfile
+          from pathlib import Path
+          from cryptography.fernet import Fernet
+          from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+          tmp = Path(os.environ['RUNNER_TEMP'])
+          root = tmp / 'naruto-chatgpt-auth'
+          buffer = io.BytesIO()
+          with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
+              for name in ('data', 'config', 'state'):
+                  directory = root / name
+                  if directory.exists():
+                      archive.add(directory, arcname=name, filter=lambda item: None if item.issym() or item.islnk() else item)
+          salt = os.urandom(16)
+          key = Scrypt(salt=salt, length=32, n=16384, r=8, p=1).derive(os.environ['CHATGPT_CACHE_KEY'].encode())
+          encrypted = Fernet(base64.urlsafe_b64encode(key)).encrypt(buffer.getvalue())
+          dest = tmp / 'naruto-auth-cache/session.enc'
+          dest.write_bytes(b'NARUTO-OAUTH-V1!' + salt + encrypted)
+          dest.chmod(0o600)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('ready=true\n')
+          print('Sessao criptografada. Tokens e arquivos de autenticacao nao foram impressos nem incluidos nos artefatos.')
+          PY
+      - name: Salvar apenas sessao criptografada para proxima execucao
+        if: always() && steps.encrypted_session.outputs.ready == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/naruto-auth-cache/session.enc
+          key: chatgpt-oauth-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Apagar sessao temporaria do ChatGPT
         if: always()
         run: |
