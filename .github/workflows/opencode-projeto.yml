@@ -22,7 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENCODE_DISABLE_AUTOUPDATE: "true"
 
     steps:
@@ -31,16 +30,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Selecionar modelo (gratuito se nao houver chave)
+      - name: Selecionar modelo gratuito sem consultar Secrets
         shell: bash
         run: |
-          if [[ -n "${OPENAI_API_KEY}" ]]; then
-            echo "OPENCODE_MODEL=openai/gpt-4.1-mini" >> "$GITHUB_ENV"
-            echo "Modelo selecionado: OpenAI com chave existente (valor nunca exibido)."
-          else
-            echo "OPENCODE_MODEL=opencode/big-pickle" >> "$GITHUB_ENV"
-            echo "Modelo selecionado: OpenCode gratuito (sujeito a disponibilidade)."
-          fi
+          echo "OPENCODE_MODEL=opencode/big-pickle" >> "$GITHUB_ENV"
+          echo "Modelo gratuito; nenhuma credencial do Discord sera usada como API da OpenAI."
 
       - name: Preparar Node
         uses: actions/setup-node@v4
