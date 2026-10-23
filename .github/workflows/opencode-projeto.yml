@@ -22,10 +22,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      OPENCODE_CONFIG: ${{ runner.temp }}/naruto-opencode.json
       OPENCODE_DISABLE_AUTOUPDATE: "true"
-      RPG_AUDIT_PATH: ${{ runner.temp }}/naruto-evidence/naruto-audit.jsonl
     steps:
+      - name: Definir caminhos de evidencia no runner
+        run: |
+          echo "OPENCODE_CONFIG=$RUNNER_TEMP/naruto-opencode.json" >> "$GITHUB_ENV"
+          echo "RPG_AUDIT_PATH=$RUNNER_TEMP/naruto-evidence/naruto-audit.jsonl" >> "$GITHUB_ENV"
       - name: Baixar branch Projeto
         uses: actions/checkout@v4
         with:
