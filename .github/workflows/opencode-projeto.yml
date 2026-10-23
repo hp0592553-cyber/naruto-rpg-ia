@@ -72,14 +72,14 @@ jobs:
           PROMPT_EOF
           )
           opencode run --agent plan --model "$OPENCODE_MODEL" "$PROMPT" | tee jogada-proposta.md
-          test -s relatorio-opencode.md
+          test -s jogada-proposta.md
 
       - name: Publicar relatorio
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: jogada-proposta-naruto
-          path: relatorio-opencode.md
+          path: jogada-proposta.md
           retention-days: 7
 
       - name: Registrar resumo do Actions
