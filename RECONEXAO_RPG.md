@@ -42,3 +42,11 @@ Referencias oficiais:
 - https://opencode.ai/docs/mcp-servers/
 - https://support.discord.com/hc/en-us/articles/115002192352-Automated-User-Accounts-Self-Bots
 - https://docs.discord.com/developers/interactions/overview
+
+## Validacao no GitHub Actions
+
+Execucao 39963215666: rejeitada antes de criar jobs por contexto runner usado em env de job; corrigido definindo caminhos por GITHUB_ENV em um step.
+
+Execucao 39963303788 (f98c537), artefato 12505801160: configuracao carregada, probe stdio e descoberta MCP pelo OpenCode passaram. O artefato resultado.json confirma mcp_started=true e opencode_discovered_tools=true. Modelo big-pickle retornou HTTP 403 FreeTierError tambem no Actions; nenhuma chamada do modelo ao status. O secret DISCORD_BOT_TOKEN chegou vazio. Nenhuma autenticacao Discord foi tentada.
+
+O workflow agora faz um probe oficial separado antes do modelo e inclui model_errors e discord_diagnostic no resultado, para preservar ambos os bloqueios. A chave de um provedor de IA e o token Discord sao credenciais distintas. O provedor precisa permitir o modelo neste ambiente; nao houve troca de identidade ou tentativa de contornar o 403.

@@ -73,6 +73,11 @@ jobs:
           rows = [json.loads(line) for line in Path(os.environ['RPG_AUDIT_PATH']).read_text().splitlines()]
           assert any(r['phase'] == 'opencode_discovery' and r['tool'] == 'list_tools' for r in rows), 'OpenCode nao descobriu ferramentas'
           PY
+      - name: Diagnosticar autenticacao oficial independentemente do modelo
+        env:
+          RPG_PHASE: discord_probe
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: python scripts/naruto_mcp_probe.py > "$RUNNER_TEMP/naruto-evidence/discord.json" 2> "$RUNNER_TEMP/naruto-evidence/discord.stderr"
       - name: OpenCode chama status real da integracao autorizada
         env:
           RPG_PHASE: opencode_action
@@ -88,10 +93,16 @@ jobs:
           path = Path(os.environ['RPG_AUDIT_PATH'])
           rows = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
           calls = [r for r in rows if r['phase'] == 'opencode_action' and r['tool'] == 'status_rpg']
+          diagnostic = [r for r in rows if r['phase'] == 'discord_probe' and r['tool'] == 'status_rpg']
+          events_path = Path(os.environ['RUNNER_TEMP']) / 'naruto-evidence/opencode.jsonl'
+          events = [json.loads(line) for line in events_path.read_text().splitlines() if line.strip()] if events_path.exists() else []
+          errors = [e.get('error', {}).get('data', {}) for e in events if e.get('type') == 'error']
           summary = {'mcp_started': any(r['tool'] == 'process' for r in rows),
                      'opencode_discovered_tools': any(r['phase'] == 'opencode_discovery' and r['tool'] == 'list_tools' for r in rows),
                      'opencode_called_status': len(calls) == 1,
                      'evidence': calls[-1]['evidence'] if calls else None,
+                     'discord_diagnostic': diagnostic[-1]['evidence'] if diagnostic else None,
+                     'model_errors': [{'message': e.get('message'), 'http_status': e.get('statusCode')} for e in errors],
                      'command_sent': False, 'command_completed': False, 'rpg_state_verified': False}
           text = json.dumps(summary, ensure_ascii=False, indent=2)
           (Path(os.environ['RUNNER_TEMP']) / 'naruto-evidence/resultado.json').write_text(text)
