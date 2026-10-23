@@ -42,6 +42,7 @@ jobs:
       - name: Definir caminhos de evidencia no runner
         timeout-minutes: 31
         run: |
+          mkdir -p "$RUNNER_TEMP/naruto-evidence"
           # Sessao OAuth isolada, fora da pasta enviada como artefato.
           mkdir -p "$RUNNER_TEMP/naruto-chatgpt-auth"
           chmod 700 "$RUNNER_TEMP/naruto-chatgpt-auth"
@@ -69,14 +70,18 @@ jobs:
         with:
           node-version: "22"
       - name: Conferir senha da tela remota sem exibir valores
+        id: desktop_password
         timeout-minutes: 31
         env:
           DESKTOP_PASSWORD: ${{ secrets.DESKTOP_PASSWORD }}
         run: |
           python - <<'PY'
           import os
-          if len(os.environ.get('DESKTOP_PASSWORD', '')) < 16:
-              raise SystemExit('Crie o secret DESKTOP_PASSWORD com uma senha aleatoria de pelo menos 16 caracteres. Ela protege a tela remota e nao e uma chave de API.')
+          value = os.environ.get('DESKTOP_PASSWORD', '')
+          if not value:
+              raise SystemExit('Secret DESKTOP_PASSWORD ausente. Crie como Repository secret em Settings → Secrets and variables → Actions.')
+          if len(value) < 16:
+              raise SystemExit('Secret DESKTOP_PASSWORD tem menos de 16 caracteres. Atualize a senha sem envia-la em logs ou chat.')
           print('Senha da tela remota configurada.')
           PY
       - name: Instalar desktop Linux, navegador e ferramentas
@@ -264,6 +269,8 @@ jobs:
       - name: Validar evidencia e distinguir bloqueio de jogada concluida
         timeout-minutes: 31
         if: always()
+        env:
+          DESKTOP_PASSWORD_CHECK: ${{ steps.desktop_password.outcome }}
         run: |
           python - <<'PY'
           import json, os
@@ -277,7 +284,10 @@ jobs:
           errors = [e.get('error', {}).get('data', {}) for e in events if e.get('type') == 'error']
           actions = [r for r in rows if r['tool'] == 'consult_missions']
           action = actions[-1]['evidence'] if actions else {}
-          summary = {'mcp_started': any(r['tool'] == 'process' for r in rows),
+          desktop_path = Path(os.environ['RUNNER_TEMP']) / 'naruto-evidence/desktop.json'
+          desktop = json.loads(desktop_path.read_text()) if desktop_path.exists() else None
+          summary = {'desktop': desktop, 'desktop_password_check': os.environ['DESKTOP_PASSWORD_CHECK'],
+                     'mcp_started': any(r['tool'] == 'process' for r in rows),
                      'opencode_discovered_tools': any(r['phase'] == 'opencode_discovery' and r['tool'] == 'list_tools' for r in rows),
                      'opencode_called_status': len(calls) == 1,
                      'evidence': calls[-1]['evidence'] if calls else None,
@@ -291,6 +301,8 @@ jobs:
           (Path(os.environ['RUNNER_TEMP']) / 'naruto-evidence/resultado.json').write_text(text)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
               f.write('## Evidencia da integracao\n```json\n' + text + '\n```\n')
+          if os.environ['DESKTOP_PASSWORD_CHECK'] != 'success':
+              raise SystemExit('BLOQUEADO na configuracao: DESKTOP_PASSWORD ausente ou com menos de 16 caracteres; nenhum desktop ou comando foi iniciado.')
           assert summary['mcp_started'], 'MCP nao iniciou'
           assert summary['opencode_discovered_tools'], 'OpenCode nao descobriu ferramentas'
           assert summary['opencode_called_status'], 'OpenCode nao chamou status exatamente uma vez'

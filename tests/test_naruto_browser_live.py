@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, Error
 from scripts import naruto_browser_mcp as mcp
 
 FIXTURE = '''<!doctype html><html><body><section aria-label="User area">Henrique</section><ol data-list-id="chat-messages"><li id="chat-messages-old" data-author-id="1515908078913192026">Mensagem antiga sintetica</li></ol>
@@ -33,7 +33,12 @@ class RealBrowserFixtureTests(unittest.IsolatedAsyncioTestCase):
             'RPG_ACTION_MARKER':directory+'/reserved', 'RPG_MODE':'jogar',
             'RPG_EVIDENCE_DIR':directory, 'RPG_AUDIT_PATH':directory+'/audit.jsonl'}):
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True, args=['--remote-debugging-port=9222','--remote-debugging-address=127.0.0.1'])
+                try:
+                    browser = await p.chromium.launch(headless=True, args=['--remote-debugging-port=9222','--remote-debugging-address=127.0.0.1'])
+                except Error as exc:
+                    if "Executable doesn't exist" in str(exc):
+                        self.skipTest('Chromium nao instalado; o workflow de desktop instala e executa este teste.')
+                    raise
                 context = await browser.new_context()
                 await context.route('**/*', lambda route: route.fulfill(status=200, content_type='text/html', body=FIXTURE))
                 page = await context.new_page()
