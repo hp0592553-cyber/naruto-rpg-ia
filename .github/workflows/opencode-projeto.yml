@@ -36,7 +36,7 @@ jobs:
         run: |
           if [[ -n "${OPENAI_API_KEY}" ]]; then
             echo "OPENCODE_MODEL=openai/gpt-4.1-mini" >> "$GITHUB_ENV"
-            echo "Modelo selecionado: OpenAI com chave existente."
+            echo "Modelo selecionado: OpenAI com chave existente (valor nunca exibido)."
           else
             echo "OPENCODE_MODEL=opencode/big-pickle" >> "$GITHUB_ENV"
             echo "Modelo selecionado: OpenCode gratuito (sujeito a disponibilidade)."
