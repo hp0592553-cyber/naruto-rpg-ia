@@ -21,7 +21,7 @@ from discord_py_self_mcp.tools import registry
 GUILD_ID = 1515877468299595919
 NARUTO_BOT_ID = "1515908078913192026"
 ALLOWED_CHANNELS = {"1520114348079583263", "1520114532511387729"}
-ALLOWED_COMMANDS = {"recompensa-diaria"}
+ALLOWED_COMMANDS = {"missoes minhas"}
 MODE = os.getenv("RPG_MODE", "verificar").lower()
 AUDIT = os.getenv("RPG_AUDIT_PATH", "")
 MAX_MESSAGES = 12
@@ -122,7 +122,7 @@ async def call_tool(name: str, arguments: dict):
         command = str(params.get("command_name", "")).strip().lstrip("/").lower()
         if actions_used >= 1 or command not in ALLOWED_COMMANDS or params.get("options"):
             audit(name, "action_denied", command=command)
-            return reply("Acao bloqueada: somente uma /recompensa-diaria sem opcoes por execucao.")
+            return reply("Acao bloqueada: somente um /missoes minhas sem opcoes por execucao.")
         if str(params.get("application_id", NARUTO_BOT_ID)) != NARUTO_BOT_ID:
             audit(name, "wrong_bot")
             return reply("Acao bloqueada: aplicativo nao e o Naruto Bot.")
