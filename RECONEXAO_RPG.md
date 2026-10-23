@@ -62,3 +62,13 @@ Escopo atual: servidor 1515877468299595919, canal 1520114348079583263, aplicativ
 A credencial OPENCODE_API_KEY, quando configurada no GitHub, e disponibilizada somente ao step do modelo, separada de DISCORD_USER_TOKEN. Nenhuma credencial e escrita na configuracao ou nos commits. Erros sao registrados por tipo e status HTTP sem texto bruto de autenticacao.
 
 Testes locais: initialize/tools-list/tools-call sem token passaram; teste simulado confirmou bloqueio de segunda tentativa apos timeout e reserva persistente entre estados, sem acesso ao Discord. Teste real com token ocorre somente no Actions.
+
+### Resultado real com DISCORD_USER_TOKEN atualizado
+
+Execucao 39965190881, commit c760c8b: MCP iniciou, OpenCode descobriu suas ferramentas, conta conectada ao Discord com apelido Henrique, servidor e canal corretos acessados. O probe independente leu 12 mensagens reais e confirmou mission_command_available=true para /missoes minhas do aplicativo 1515908078913192026 (comando raiz 1515911478203519009). Isso comprova login/leitura/descoberta pelo MCP, nao uma chamada pelo modelo nem estado do personagem no RPG.
+
+O OpenCode recebeu HTTP 403 FreeTierError do provedor antes de chamar ferramentas. command_attempted=false, command_sent=false, command_completed=false. Nenhuma tentativa de jogada foi realizada. Evidencias no artefato naruto-jogada-tentativa da execucao indicada.
+
+Configuracao de IA: secret OPENCODE_API_KEY para OpenCode, ou OPENAI_API_KEY para OpenAI, sem misturar com DISCORD_USER_TOKEN. A variavel de repositorio RPG_MODEL seleciona explicitamente o modelo, mantendo opencode/big-pickle como padrao. Para OpenAI, usar o identificador de modelo OpenAI disponivel na conta no formato openai/<modelo>. Nenhuma chave ou modelo pago foi criado ou selecionado automaticamente. A disponibilidade e autorizacao do modelo precisam ser confirmadas numa execucao real.
+
+Captura de resposta inclui componentes alem de texto/embeds e aceita eventos de edicao; respostas com loading=true nao sao concluidas. Teste simulado validou correlacao por ID, descarte de interacao alheia e resposta em carregamento, captura da edicao e bloqueio de repeticao. Esse teste nao e evidencia de resposta real do Naruto Bot.

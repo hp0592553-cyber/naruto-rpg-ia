@@ -23,6 +23,10 @@ class RestrictedClient(discord.Client):
         if self.receiver:
             await self.receiver(message)
 
+    async def on_message_edit(self, before, after):
+        if self.receiver:
+            await self.receiver(after)
+
 
 client = RestrictedClient()
 connection = None
@@ -98,6 +102,7 @@ def message_data(message):
     return {'message_id': str(message.id), 'author_id': str(message.author.id),
             'channel_id': str(message.channel.id), 'content': message.content,
             'embeds': [embed.to_dict() for embed in message.embeds],
+            'components': [component.to_dict() for component in getattr(message, 'components', [])],
             'ephemeral': bool(getattr(message.flags, 'ephemeral', False))}
 
 
@@ -160,6 +165,8 @@ async def consult():
             except asyncio.TimeoutError:
                 break
             metadata = getattr(msg, 'interaction', None) or getattr(msg, 'interaction_metadata', None)
+            if getattr(msg.flags, 'loading', False):
+                continue
             if interaction_id and getattr(metadata, 'id', None) == interaction_id:
                 state.update(command_completed=True, response=message_data(msg))
                 # Conteudo capturado e verificavel; nao inferir XP/nivel automaticamente.

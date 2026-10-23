@@ -83,10 +83,12 @@ jobs:
         env:
           RPG_PHASE: opencode_action
           RPG_MODE: jogar
+          RPG_MODEL: ${{ vars.RPG_MODEL || 'opencode/big-pickle' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
         run: |
-          timeout 180 opencode run --format json --agent build --model opencode/big-pickle 'Use somente ferramentas naruto. Chame naruto_status_rpg {}. Se conectado ao Naruto Project, chame naruto_read_messages {} e naruto_list_application_commands {}. Se mission_command_available for true, chame naruto_consult_missions {} exatamente UMA vez. Nunca repita apos erro ou timeout. Relate comando tentado, enviado e resposta comprovada separadamente. Nao invente estado do RPG. Pare se login, provedor ou acesso falhar.' > "$RUNNER_TEMP/naruto-evidence/opencode.jsonl" 2> "$RUNNER_TEMP/naruto-evidence/opencode.stderr"
+          timeout 180 opencode run --format json --agent build --model "$RPG_MODEL" 'Use somente ferramentas naruto. Chame naruto_status_rpg {}. Se conectado ao Naruto Project, chame naruto_read_messages {} e naruto_list_application_commands {}. Se mission_command_available for true, chame naruto_consult_missions {} exatamente UMA vez. Nunca repita apos erro ou timeout. Relate comando tentado, enviado e resposta comprovada separadamente. Nao invente estado do RPG. Pare se login, provedor ou acesso falhar.' > "$RUNNER_TEMP/naruto-evidence/opencode.jsonl" 2> "$RUNNER_TEMP/naruto-evidence/opencode.stderr"
       - name: Validar evidencia e distinguir bloqueio de jogada concluida
         if: always()
         run: |
