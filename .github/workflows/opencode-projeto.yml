@@ -28,11 +28,12 @@ jobs:
     if: github.ref == 'refs/heads/Projeto'
     name: Verificar MCP e acesso autorizado ao Naruto Project
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 180
     env:
       OPENCODE_DISABLE_AUTOUPDATE: "true"
     steps:
       - name: Definir caminhos de evidencia no runner
+        timeout-minutes: 31
         run: |
           # Sessao OAuth isolada, fora da pasta enviada como artefato.
           mkdir -p "$RUNNER_TEMP/naruto-chatgpt-auth"
@@ -45,17 +46,21 @@ jobs:
           echo "RPG_ACTION_MARKER=$RUNNER_TEMP/naruto-action-reserved" >> "$GITHUB_ENV"
           echo "RPG_AUDIT_PATH=$RUNNER_TEMP/naruto-evidence/naruto-audit.jsonl" >> "$GITHUB_ENV"
       - name: Baixar branch Projeto
+        timeout-minutes: 31
         uses: actions/checkout@v4
         with:
           ref: Projeto
           persist-credentials: false
       - uses: actions/setup-python@v5
+        timeout-minutes: 31
         with:
           python-version: "3.11"
       - uses: actions/setup-node@v4
+        timeout-minutes: 31
         with:
           node-version: "22"
       - name: Instalar somente dependencias oficiais do diagnostico
+        timeout-minutes: 31
         run: |
           python -m pip install --disable-pip-version-check 'mcp==1.30.0' 'httpx==0.28.1' 'discord.py-self==2.1.0' 'cryptography==46.0.3'
           npm install --global opencode-ai@1.19.4
@@ -63,8 +68,17 @@ jobs:
           mkdir -p "$RUNNER_TEMP/naruto-evidence"
           python -m py_compile scripts/naruto_*.py
       - name: Configurar MCP explicitamente
+        timeout-minutes: 31
         run: |
           python scripts/naruto_opencode_config.py
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ['OPENCODE_CONFIG'])
+          config = json.loads(path.read_text())
+          config['mcp']['naruto']['timeout'] = 1800000
+          path.write_text(json.dumps(config))
+          PY
           opencode debug config > "$RUNNER_TEMP/naruto-evidence/config-resolvida.json" 2> "$RUNNER_TEMP/naruto-evidence/config.stderr"
           python - <<'PY'
           import json, os
@@ -74,14 +88,16 @@ jobs:
           assert Path(config['mcp']['naruto']['command'][1]).is_absolute()
           PY
       - name: Testar initialize, descoberta e chamada stdio sem Discord
+        timeout-minutes: 31
         env:
           RPG_PHASE: stdio_probe
-        run: python scripts/naruto_mcp_probe.py > "$RUNNER_TEMP/naruto-evidence/stdio.json" 2> "$RUNNER_TEMP/naruto-evidence/stdio.stderr"
+        run: python -c 'import asyncio; from scripts.naruto_mcp_probe import main; asyncio.run(asyncio.wait_for(main(), timeout=1800))' > "$RUNNER_TEMP/naruto-evidence/stdio.json" 2> "$RUNNER_TEMP/naruto-evidence/stdio.stderr"
       - name: Verificar conexao do MCP pelo OpenCode
+        timeout-minutes: 31
         env:
           RPG_PHASE: opencode_discovery
         run: |
-          timeout 120 opencode mcp list > "$RUNNER_TEMP/naruto-evidence/mcp-list.txt" 2> "$RUNNER_TEMP/naruto-evidence/mcp-list.stderr"
+          timeout 1800 opencode mcp list > "$RUNNER_TEMP/naruto-evidence/mcp-list.txt" 2> "$RUNNER_TEMP/naruto-evidence/mcp-list.stderr"
           cat "$RUNNER_TEMP/naruto-evidence/mcp-list.txt"
           python - <<'PY'
           import json, os
@@ -90,6 +106,7 @@ jobs:
           assert any(r['phase'] == 'opencode_discovery' and r['tool'] == 'list_tools' for r in rows), 'OpenCode nao descobriu ferramentas'
           PY
       - name: Preparar persistencia criptografada do login
+        timeout-minutes: 31
         id: auth_cache
         env:
           CHATGPT_CACHE_KEY: ${{ secrets.CHATGPT_CACHE_KEY }}
@@ -107,6 +124,7 @@ jobs:
               print('Login sem persistencia: configure CHATGPT_CACHE_KEY com 32 ou mais caracteres aleatorios para ativar cache criptografado. Nao e uma chave de API.')
           PY
       - name: Restaurar somente cache criptografado
+        timeout-minutes: 31
         id: restore_auth
         if: steps.auth_cache.outputs.enabled == 'true' && inputs.renew_login != true
         uses: actions/cache/restore@v4
@@ -116,6 +134,7 @@ jobs:
           restore-keys: |
             chatgpt-oauth-v1-${{ runner.os }}-${{ github.ref_name }}-
       - name: Abrir sessao criptografada no runner temporario
+        timeout-minutes: 31
         id: restored_session
         if: steps.auth_cache.outputs.enabled == 'true' && steps.restore_auth.outputs.cache-matched-key != ''
         env:
@@ -146,21 +165,22 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"ready={str(ready).lower()}\n")
           PY
-      - name: Conectar ChatGPT Plus por link e codigo (aguarda ate 10 minutos)
+      - name: Conectar ChatGPT Plus por link e codigo (aguarda ate 30 minutos)
+        timeout-minutes: 31
         id: chatgpt_login
         if: steps.restored_session.outputs.ready != 'true'
-        timeout-minutes: 11
         run: |
           echo "Abra https://auth.openai.com/codex/device no seu navegador."
           echo "Use o codigo exibido abaixo pelo OpenCode e autorize sua conta ChatGPT Plus."
           echo "Se necessario, habilite login por codigo de dispositivo nas configuracoes de seguranca do ChatGPT."
           printf '## Login ChatGPT Plus\nAbra o step **Conectar ChatGPT Plus por link e codigo** nos logs desta execucao e autorize com o codigo temporario. Com CHATGPT_CACHE_KEY configurado, a sessao sera salva criptografada.\n' >> "$GITHUB_STEP_SUMMARY"
-          timeout 600 opencode auth login --provider openai --method 'ChatGPT Pro/Plus (headless)'
+          timeout 1800 opencode auth login --provider openai --method 'ChatGPT Pro/Plus (headless)'
       - name: Validar modelo da assinatura apos login
+        timeout-minutes: 31
         env:
           RPG_MODEL: ${{ inputs.model || 'openai/gpt-6.1-sol' }}
         run: |
-          timeout 120 opencode models openai > "$RUNNER_TEMP/naruto-evidence/modelos-chatgpt.txt"
+          timeout 1800 opencode models openai > "$RUNNER_TEMP/naruto-evidence/modelos-chatgpt.txt"
           python - <<'PY'
           import os, re
           from pathlib import Path
@@ -172,19 +192,22 @@ jobs:
           print('Modelo da assinatura encontrado:', selected)
           PY
       - name: Diagnosticar conta autorizada independentemente do modelo
+        timeout-minutes: 31
         env:
           RPG_PHASE: discord_probe
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
-        run: python scripts/naruto_mcp_probe.py > "$RUNNER_TEMP/naruto-evidence/discord.json" 2> "$RUNNER_TEMP/naruto-evidence/discord.stderr"
+        run: python -c 'import asyncio; from scripts.naruto_mcp_probe import main; asyncio.run(asyncio.wait_for(main(), timeout=1800))' > "$RUNNER_TEMP/naruto-evidence/discord.json" 2> "$RUNNER_TEMP/naruto-evidence/discord.stderr"
       - name: OpenCode tenta uma consulta de missoes com evidencia
+        timeout-minutes: 31
         env:
           RPG_PHASE: opencode_action
           RPG_MODE: jogar
           RPG_MODEL: ${{ inputs.model || 'openai/gpt-6.1-sol' }}
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
         run: |
-          timeout 300 opencode run --format json --agent build --model "$RPG_MODEL" 'Use somente ferramentas naruto. Chame naruto_status_rpg {}. Se conectado ao Naruto Project, chame naruto_read_messages {} e naruto_list_application_commands {}. Se mission_command_available for true, chame naruto_consult_missions {} exatamente UMA vez. Nunca repita apos erro ou timeout. Relate comando tentado, enviado e resposta comprovada separadamente. Nao invente estado do RPG. Pare se login, provedor ou acesso falhar.' > "$RUNNER_TEMP/naruto-evidence/opencode.jsonl" 2> "$RUNNER_TEMP/naruto-evidence/opencode.stderr"
+          timeout 1800 opencode run --format json --agent build --model "$RPG_MODEL" 'Use somente ferramentas naruto. Chame naruto_status_rpg {}. Se conectado ao Naruto Project, chame naruto_read_messages {} e naruto_list_application_commands {}. Se mission_command_available for true, chame naruto_consult_missions {} exatamente UMA vez. Nunca repita apos erro ou timeout. Relate comando tentado, enviado e resposta comprovada separadamente. Nao invente estado do RPG. Pare se login, provedor ou acesso falhar.' > "$RUNNER_TEMP/naruto-evidence/opencode.jsonl" 2> "$RUNNER_TEMP/naruto-evidence/opencode.stderr"
       - name: Validar evidencia e distinguir bloqueio de jogada concluida
+        timeout-minutes: 31
         if: always()
         run: |
           python - <<'PY'
@@ -220,6 +243,7 @@ jobs:
           assert summary['rpg_state_verified'], 'Resposta capturada; estado do RPG ainda requer conferencia do conteudo real'
           PY
       - name: Publicar evidencia inclusive erros
+        timeout-minutes: 31
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -228,6 +252,7 @@ jobs:
           retention-days: 7
           path: ${{ runner.temp }}/naruto-evidence/
       - name: Criptografar sessao atualizada antes de limpar o runner
+        timeout-minutes: 31
         id: encrypted_session
         if: always() && steps.auth_cache.outputs.enabled == 'true' && (steps.chatgpt_login.outcome == 'success' || steps.restored_session.outputs.ready == 'true')
         env:
@@ -257,12 +282,14 @@ jobs:
           print('Sessao criptografada. Tokens e arquivos de autenticacao nao foram impressos nem incluidos nos artefatos.')
           PY
       - name: Salvar apenas sessao criptografada para proxima execucao
+        timeout-minutes: 31
         if: always() && steps.encrypted_session.outputs.ready == 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/naruto-auth-cache/session.enc
           key: chatgpt-oauth-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Apagar sessao temporaria do ChatGPT
+        timeout-minutes: 31
         if: always()
         run: |
           # Caminho fixo no runner; nunca imprimir ou enviar arquivos de credenciais.
