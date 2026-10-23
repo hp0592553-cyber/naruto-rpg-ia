@@ -1,0 +1,83 @@
+name: Diagnostico Naruto RPG IA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci/diagnostico-rpg
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnostico-rpg-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnostico:
+    name: Verificar codigo e configuracao (sem Discord)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Baixar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verificar sintaxe dos arquivos Python
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          roots = [Path("discord_py_self_mcp"), Path("scripts")]
+          files = [p for root in roots if root.exists() for p in root.rglob("*.py")]
+          if not files:
+              raise SystemExit("ERRO: nenhum arquivo Python encontrado")
+          errors = []
+          for path in files:
+              try:
+                  ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+              except (SyntaxError, UnicodeError) as exc:
+                  errors.append(f"{path}: {exc}")
+          print(f"Arquivos Python analisados: {len(files)}")
+          if errors:
+              raise SystemExit("\n".join(errors))
+          print("OK: sintaxe Python valida")
+          PY
+
+      - name: Verificar pyproject.toml
+        shell: bash
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          path = Path("pyproject.toml")
+          if not path.is_file():
+              raise SystemExit("ERRO: pyproject.toml nao encontrado")
+          with path.open("rb") as stream:
+              data = tomllib.load(stream)
+          project = data.get("project", {})
+          for field in ("name", "version"):
+              if not project.get(field):
+                  raise SystemExit(f"ERRO: campo project.{field} ausente")
+          print(f"OK: {project['name']} versao {project['version']}")
+          PY
+
+      - name: Resumo
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Diagnostico Naruto RPG IA"
+            echo ""
+            echo "- Apenas verificacoes locais e estaticas."
+            echo "- Nenhum login no Discord, token ou comando do RPG foi utilizado."
+            echo "- Veja os passos acima para identificar falhas."
+          } >> "$GITHUB_STEP_SUMMARY"
