@@ -1,57 +1,44 @@
-# Reconector do RPG (OpenCode + Discord MCP)
+# Diagnostico Naruto Project — 2026-10-23
 
-Este script mantém uma sessão do **OpenCode** e verifica a autenticação do Discord
-a cada 120 segundos sem usar créditos do modelo de IA.
+Branch: `Projeto`. Workflow unico de RPG: `.github/workflows/opencode-projeto.yml`.
 
-## Como usar no GitHub Codespaces
+## Execucao 39961824818, commit 904fc3e3
 
-1. Feche outras sessões do OpenCode para não deixar instâncias antigas usando a credencial anterior.
-2. Abra um terminal Bash dentro do Codespaces.
-3. Execute:
+Logs do job 120441450625: OpenCode 1.19.4; ausencia de auditoria aceita com `SystemExit(0)`.
+Artefato 12505147174, `naruto-jogada-tentativa`: somente `relatorio-naruto.md`, contendo:
 
-```bash
-cd /workspaces/naruto-rpg-ia
-git pull
-python3 scripts/rpg_reconectar.py
-```
+> Não consigo executar: as ferramentas MCP `naruto_*` não estão disponíveis nesta sessão (só tenho glob, grep, read, skill, task e todowrite). Nenhuma chamada foi feita, nenhuma resposta foi lida e nada foi inventado.
 
-4. Se não houver `DISCORD_TOKEN` no ambiente, o programa pedirá a chave no próprio terminal sem exibi-la.
-5. Se a autenticação for aceita (HTTP 200), ele abrirá o OpenCode no diretório do projeto.
+Nao ha evidencia de login, leitura, envio ou resposta. O artefato nao contem auditoria.
+A ausencia de auditoria sozinha nao prova que o processo nunca iniciou: o codigo antigo so auditava chamadas de ferramentas. Os logs antigos nao preservaram o erro de inicializacao. Portanto a causa exata daquela inicializacao nao pode ser afirmada.
 
-## O que acontece se a conexão falhar?
+## Correcao
 
-- **401:** o OpenCode é interrompido, o script solicita uma nova chave e verifica a autenticação antes de reabri-lo.
-- **403:** o OpenCode é interrompido e o script oferece repetir a verificação, informar outra chave ou sair. Isso não prova que o token está inválido.
-- **Falha de rede ou 429:** aparece um aviso, e o script volta a verificar na próxima rodada, sem insistir rapidamente.
-- **OpenCode fechado normalmente:** o reconector continua aberto e oferece `[r] reabrir OpenCode` ou `[s] sair`. A chave permanece só na memória enquanto o reconector estiver aberto.
-- **OpenCode fecha com erro:** o reconector tenta reiniciar até duas vezes, com pequena pausa; após três falhas, pede uma escolha para evitar um ciclo infinito.
-- **Duas instâncias:** um bloqueio impede iniciar dois reconectores ao mesmo tempo no mesmo Codespaces.
+- Configuracao carregada explicitamente por `OPENCODE_CONFIG`, executavel e script com caminhos absolutos.
+- OpenCode fixado em 1.19.4 para reproduzir a versao observada.
+- Probe independente verifica protocolo stdio real: initialize, tools/list, tools/call.
+- `opencode mcp list` deve causar `list_tools` na fase de descoberta. Um texto de resposta do modelo nao basta.
+- Nome MCP: `status_rpg`; nome exposto ao modelo: `naruto_status_rpg`.
+- Auditoria separa processo, descoberta e chamada pelo modelo. Erros stderr e eventos JSON sao preservados.
+- Sem imports de self-bot, CAPTCHA ou fallback de token pessoal. Este workflow instala somente MCP e HTTPX.
+- `DISCORD_USER_TOKEN` permanece intocado no GitHub, mas nao e mais disponibilizado ao processo.
+- Diagnostico de bot oficial usa exclusivamente secret `DISCORD_BOT_TOKEN`, Authorization Bot e verifica identidade bot, servidor e canal exatos. Nao envia mensagens nem comandos.
+- Ausencia de resposta comprovada nunca gera sucesso de jogada. O job termina bloqueado/vermelho enquanto nao houver integracao autorizada.
 
-Isso **não captura tokens automaticamente** nem prevê a sua troca. A verificação HTTP
-testa a autenticação na API, mas não garante que o gateway Discord esteja pronto.
+## Testes locais
 
-## Segurança e limites
+Probe stdio passou; OpenCode carregou a configuracao explicita e mostrou `naruto connected`; auditoria confirmou tools/list pelo OpenCode.
+A chamada ao modelo big-pickle local retornou HTTP 403 FreeTierError (restricao do provedor). Nao houve tentativa de contornar. O workflow permite verificar separadamente o comportamento no GitHub Actions.
 
-- O token é mantido apenas na memória do processo e herdado pela sessão do OpenCode.
-- O token não é escrito no repositório, em arquivo .env ou nos logs pelo script.
-- Não envie tokens em prints, chats, commits ou comandos de terminal visíveis.
-- O script **não envia mensagens** ao Discord; só gerencia a sessão local do OpenCode.
-- Sua sessão RPG continua nos arquivos do Codespaces, como `HISTORICO_RPG.md`, se o arquivo existir. Este script não o modifica.
-- O monitor para quando o Codespaces é encerrado/suspenso; não é um serviço 24 horas.
-- O supervisor não executa jogadas sozinho: quem lê e age é a sessão do OpenCode, quando houver uma tarefa ativa.
-- A verificação da API não demonstra que a conexão do gateway do Discord esteja pronta; confirma apenas a resposta HTTP à autenticação.
-- Automação de contas pessoais do Discord ("self-bots") pode violar as regras da plataforma.
+## Impedimento e alternativa autorizada
 
-## Sem precisar usar OpenCode nem gastar cota
+Discord proibe automacao de contas pessoais. Token de bot nao assume identidade de Henrique e enviar texto `/missoes minhas` nao executa um slash command.
+Necessario obter do responsavel pelo Naruto Bot uma API/ponte oficial que autorize consultar e agir pelo personagem Henrique, com identidade vinculada, limites, identificador de acao, resposta e estado verificaveis. A existencia dessa API nao foi comprovada. Alternativa disponivel sem essa API: Henrique executar o slash command manualmente no cliente Discord; um bot oficial instalado e autorizado pode observar respostas publicas, mas isso nao constitui jogo autonomo e nao permite ler respostas efemeras de Henrique.
 
-O supervisor confere o status da autenticação por HTTP diretamente no terminal; isso não
-utiliza um modelo de IA. Uso do OpenCode com GPT, no entanto, continua consumindo a cota
-aplicável ao plano.
+Nenhuma jogada foi enviada. Nenhuma resposta do Naruto Bot ou estado do RPG foi confirmado.
 
-## Diagnóstico rápido pelo celular
-
-Se a tela voltar ao Bash (`$`), o OpenCode encerrou. Nas versões atuais do
-reconector, escolha `r` na pergunta `[r] reabrir OpenCode, [s] sair`.
-Se você já saiu completamente do programa, rode novamente `python3 scripts/rpg_reconectar.py`.
-Se o Código Python falhar ao iniciar depois de um `git pull`, verifique a sintaxe com
-`python3 -m py_compile scripts/rpg_reconectar.py`. Esse teste não chama o Discord.
+Referencias oficiais:
+- https://opencode.ai/docs/config/
+- https://opencode.ai/docs/mcp-servers/
+- https://support.discord.com/hc/en-us/articles/115002192352-Automated-User-Accounts-Self-Bots
+- https://docs.discord.com/developers/interactions/overview

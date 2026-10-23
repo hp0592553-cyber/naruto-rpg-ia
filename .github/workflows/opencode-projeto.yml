@@ -5,6 +5,7 @@ on:
     branches: [Projeto]
     paths:
       - .github/workflows/opencode-projeto.yml
+      - scripts/naruto_*.py
   workflow_dispatch:
 
 permissions:
@@ -12,134 +13,98 @@ permissions:
 
 concurrency:
   group: naruto-rpg-opencode-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   jogar:
-    name: Tentar uma acao no Naruto Project
+    if: github.ref == 'refs/heads/Projeto'
+    name: Verificar MCP e acesso autorizado ao Naruto Project
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
+    timeout-minutes: 12
+    env:
+      OPENCODE_CONFIG: ${{ runner.temp }}/naruto-opencode.json
+      OPENCODE_DISABLE_AUTOUPDATE: "true"
+      RPG_AUDIT_PATH: ${{ runner.temp }}/naruto-evidence/naruto-audit.jsonl
     steps:
       - name: Baixar branch Projeto
         uses: actions/checkout@v4
         with:
+          ref: Projeto
           persist-credentials: false
-
-      - name: Compilar MCP do projeto
-        run: python3 -m py_compile scripts/naruto_guarded_mcp.py
-
-      - name: Instalar Python e OpenCode
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Preparar Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
-
-      - name: Instalar ferramentas do projeto
-        shell: bash
+      - name: Instalar somente dependencias oficiais do diagnostico
         run: |
-          python -m pip install --disable-pip-version-check -r requirements.txt
-          npm install --global opencode-ai
+          python -m pip install --disable-pip-version-check 'mcp==1.30.0' 'httpx==0.28.1'
+          npm install --global opencode-ai@1.19.4
           opencode --version
-
-      - name: Registrar MCP restrito no OpenCode
-        shell: bash
+          mkdir -p "$RUNNER_TEMP/naruto-evidence"
+          python -m py_compile scripts/naruto_*.py
+      - name: Configurar MCP explicitamente
         run: |
-          mkdir -p "$HOME/.config/opencode"
-          python3 - <<'PY'
-          import json
+          python scripts/naruto_opencode_config.py
+          opencode debug config > "$RUNNER_TEMP/naruto-evidence/config-resolvida.json" 2> "$RUNNER_TEMP/naruto-evidence/config.stderr"
+          python - <<'PY'
+          import json, os
           from pathlib import Path
-          import os
-          config = {
-              "$schema": "https://opencode.ai/config.json",
-              "permission": {
-                  "bash": "deny",
-                  "edit": "deny",
-                  "write": "deny",
-                  "webfetch": "deny",
-                  "websearch": "deny",
-                  "external_directory": "deny"
-              },
-              "mcp": {
-                  "naruto": {
-                      "type": "local",
-                      "command": ["python3", "scripts/naruto_guarded_mcp.py"],
-                      "enabled": True,
-                      "timeout": 60000
-                  }
-              }
-          }
-          dest = Path.home() / ".config" / "opencode" / "opencode.json"
-          dest.write_text(json.dumps(config), encoding="utf-8")
+          config = json.loads((Path(os.environ['RUNNER_TEMP']) / 'naruto-evidence/config-resolvida.json').read_text())
+          assert config['mcp']['naruto']['enabled'] is True
+          assert Path(config['mcp']['naruto']['command'][1]).is_absolute()
           PY
-
-      - name: OpenCode tenta consultar missoes do Naruto Project
-        shell: bash
+      - name: Testar initialize, descoberta e chamada stdio sem Discord
         env:
-          DISCORD_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
-          RPG_MODE: jogar
-          RPG_AUDIT_PATH: ${{ runner.temp }}/naruto-audit.jsonl
-          OPENCODE_DISABLE_AUTOUPDATE: "true"
+          RPG_PHASE: stdio_probe
+        run: python scripts/naruto_mcp_probe.py > "$RUNNER_TEMP/naruto-evidence/stdio.json" 2> "$RUNNER_TEMP/naruto-evidence/stdio.stderr"
+      - name: Verificar conexao do MCP pelo OpenCode
+        env:
+          RPG_PHASE: opencode_discovery
         run: |
-          set -euo pipefail
-          if [[ -z "$DISCORD_TOKEN" ]]; then
-            echo "::error::Secret DISCORD_USER_TOKEN ausente ou vazio."
-            exit 1
-          fi
-          cat > "$RUNNER_TEMP/tarefa.txt" <<'PROMPT'
-          Objetivo: tentar UMA acao real e verificavel do personagem Henrique Uchiha
-          no Naruto Project, nunca no Full Power ou Retsuden.
-          Acesse SOMENTE as ferramentas MCP naruto (nao use bash nem outras ferramentas).
-          1. Chame naruto_status_rpg para verificar a conexao ao servidor.
-          2. Leia ate 12 mensagens no canal 1520114348079583263 com naruto_read_messages.
-          3. Consulte naruto_list_application_commands no mesmo canal.
-          4. Se a conexao, canal e comando estiverem disponiveis, use UMA UNICA VEZ
-             naruto_send_slash_command com:
-             channel_id = 1520114348079583263
-             application_id = 1515908078913192026
-             command_name = "missoes minhas"
-             options = {}
-          5. Leia a resposta em naruto_list_ephemeral_messages e naruto_read_messages.
-          6. Relate se a chamada ocorreu e SE houve resposta confirmada.
-          Nao tente outros comandos ou envie mensagens a pessoas.
-          Nao repita a acao diante de erro, atraso ou resposta incompleta.
-          Nao leia nem exiba tokens, segredos, arquivos .env ou configuracao de conta.
-          Nao invente resultados, niveis, recompensas nem XP.
-          PROMPT
-          opencode run --agent build --model opencode/big-pickle "$(cat "$RUNNER_TEMP/tarefa.txt")" > relatorio-naruto.md
-          test -s relatorio-naruto.md
-
-      - name: Conferir chamadas registradas
-        shell: bash
+          timeout 120 opencode mcp list > "$RUNNER_TEMP/naruto-evidence/mcp-list.txt" 2> "$RUNNER_TEMP/naruto-evidence/mcp-list.stderr"
+          cat "$RUNNER_TEMP/naruto-evidence/mcp-list.txt"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          rows = [json.loads(line) for line in Path(os.environ['RPG_AUDIT_PATH']).read_text().splitlines()]
+          assert any(r['phase'] == 'opencode_discovery' and r['tool'] == 'list_tools' for r in rows), 'OpenCode nao descobriu ferramentas'
+          PY
+      - name: OpenCode chama status real da integracao autorizada
+        env:
+          RPG_PHASE: opencode_action
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: |
+          timeout 180 opencode run --format json --agent build --model opencode/big-pickle 'Chame a ferramenta naruto_status_rpg com {} exatamente uma vez. Relate o resultado real e pare. Nao execute outras ferramentas. Nao afirme que Henrique jogou. Se bloqueado, registre o bloqueio.' > "$RUNNER_TEMP/naruto-evidence/opencode.jsonl" 2> "$RUNNER_TEMP/naruto-evidence/opencode.stderr"
+      - name: Validar evidencia e distinguir bloqueio de jogada concluida
         if: always()
-        env:
-          RPG_AUDIT_PATH: ${{ runner.temp }}/naruto-audit.jsonl
         run: |
-          python3 - <<'PY'
-          import json
-          import os
+          python - <<'PY'
+          import json, os
           from pathlib import Path
-          path = Path(os.environ["RPG_AUDIT_PATH"])
-          if not path.is_file():
-              print("Nao houve registro de conexao ao MCP.")
-              raise SystemExit(0)
-          calls = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-          for item in calls:
-              print(f"{item['tool']}: {item['outcome']}")
-          print("Envio nao comprova resposta do Naruto Bot ou ganho de XP.")
+          path = Path(os.environ['RPG_AUDIT_PATH'])
+          rows = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+          calls = [r for r in rows if r['phase'] == 'opencode_action' and r['tool'] == 'status_rpg']
+          summary = {'mcp_started': any(r['tool'] == 'process' for r in rows),
+                     'opencode_discovered_tools': any(r['phase'] == 'opencode_discovery' and r['tool'] == 'list_tools' for r in rows),
+                     'opencode_called_status': len(calls) == 1,
+                     'evidence': calls[-1]['evidence'] if calls else None,
+                     'command_sent': False, 'command_completed': False, 'rpg_state_verified': False}
+          text = json.dumps(summary, ensure_ascii=False, indent=2)
+          (Path(os.environ['RUNNER_TEMP']) / 'naruto-evidence/resultado.json').write_text(text)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('## Evidencia da integracao\n```json\n' + text + '\n```\n')
+          assert summary['mcp_started'], 'MCP nao iniciou'
+          assert summary['opencode_discovered_tools'], 'OpenCode nao descobriu ferramentas'
+          assert summary['opencode_called_status'], 'OpenCode nao chamou status exatamente uma vez'
+          raise SystemExit('BLOQUEADO: nenhuma jogada executada. Consulte resultado.json para autenticacao/acesso e integracao autorizada do Naruto Bot.')
           PY
-
-      - name: Publicar auditoria e relatorio
+      - name: Publicar evidencia inclusive erros
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: naruto-jogada-tentativa
-          if-no-files-found: warn
-          retention-days: 3
-          path: |
-            relatorio-naruto.md
-            ${{ runner.temp }}/naruto-audit.jsonl
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ runner.temp }}/naruto-evidence/
