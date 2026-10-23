@@ -26,7 +26,7 @@ def launch(name, command, env=None):
     return process
 
 
-def wait_http(url + '/vnc.html', timeout=90):
+def wait_http(url, timeout=90):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
