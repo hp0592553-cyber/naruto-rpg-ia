@@ -26,7 +26,7 @@ def launch(name, command, env=None):
     return process
 
 
-def wait_http(url, timeout=90):
+def wait_http(url + '/vnc.html', timeout=90):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -75,7 +75,7 @@ def start():
     launch('proxy', [sys.executable, str(Path(__file__).with_name('naruto_desktop_proxy.py'))], env)
     launch('browser', [sys.executable, str(Path(__file__).resolve()), 'browser'], browser_env)
     wait_http('http://127.0.0.1:9222/json/version')
-    if wait_http('http://127.0.0.1:6080/') != 401:
+    if wait_http('http://127.0.0.1:6080/vnc.html') != 401:
         raise SystemExit('Desktop nao exigiu autenticacao; tunel nao sera aberto.')
     # O CDP fica somente no loopback. O unico destino publico e o proxy autenticado.
     launch('tunnel', ['cloudflared', 'tunnel', '--no-autoupdate', '--protocol', 'http2', '--url', 'http://127.0.0.1:6080'], browser_env)
@@ -85,7 +85,7 @@ def start():
         urls = re.findall(r'https://[a-z0-9]+(?:-[a-z0-9]+){2,}\.trycloudflare\.com', log)
         if urls:
             url = urls[-1]
-            if wait_http(url, timeout=90) != 401:
+            if wait_http(url + '/vnc.html', timeout=90) != 401:
                 raise SystemExit('Tunel nao exigiu autenticacao. Acesso nao sera publicado.')
             evidence = Path(os.environ['RPG_EVIDENCE_DIR']) / 'desktop.json'
             evidence.write_text(json.dumps({'desktop_started': True, 'local_http_requires_auth': True, 'public_http_requires_auth': True, 'cdp': 'loopback_only', 'desktop_url': url}))

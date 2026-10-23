@@ -36,7 +36,7 @@ O job inteiro tem limite de 3 horas. Cada etapa tem limite de 31 minutos, exceto
 - Um Enter de envio e uma tentativa, nao prova de resposta. Texto comum `/missoes minhas` nao e usado como substituto de um slash command.
 - O estado so e marcado conferido quando o texto real da resposta permite reconhecer a lista de missoes ou ausencia de missoes ativas. Nenhum XP, nivel ou recompensa e inferido.
 
-Alem de proteger a tela com HTTPS e HTTP Basic, VNC, websockify e CDP ficam no loopback. O proxy nao permite navegar por arquivos do runner nem acessar o CDP remotamente. Todos os caminhos e WebSockets exigem autenticacao; os botoes de liberar/encerrar exigem a mesma origem.
+Alem de proteger a tela com HTTPS e HTTP Basic, VNC, websockify e CDP ficam no loopback. O proxy nao permite navegar por arquivos do runner nem acessar o CDP remotamente. Todos os arquivos da tela e WebSockets exigem autenticacao (a pagina inicial publica so mostra o formulario de login); os botoes de liberar/encerrar exigem a mesma origem.
 
 Cookies, perfil Chromium e credenciais ChatGPT nao entram nos artefatos. Somente o arquivo cifrado e colocado no cache. As imagens/textos do chat entram no artefato `naruto-jogada-tentativa`; neste repositorio publico eles podem ser vistos por quem tem acesso aos artefatos. Sessoes podem expirar ou exigir novo login, e o cache pode ser removido pelo GitHub. Use `renew_login` para renovar o ChatGPT se necessario.
 
@@ -47,3 +47,7 @@ Os testes locais usam dados sinteticos: verificam HTTP Basic, bloqueio de arquiv
 A UI do Discord pode mudar. Seletores nao reconhecidos sao tratados como bloqueio, sem clicar/enviar por tentativa e erro. A primeira execucao deste novo modo ainda exige login manual e confirmacao visual do usuario.
 
 Referencias: [Playwright CDP](https://playwright.dev/python/docs/api/class-browsertype#browser-type-connect-over-cdp), [Cloudflare Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/), [noVNC](https://novnc.com/info.html).
+
+## Link privado com token
+
+A pagina inicial aceita um link no formato `https://<tunel>/#access=<senha-da-tela>`. O fragmento apos `#` nao e enviado na URL HTTP; a pagina o remove do historico e troca por cookie HttpOnly, Secure e SameSite=Strict. Esse link completo e uma credencial: nao deve ser publicado nos logs, issues ou artefatos. O workflow publica somente o endereco sem token. A pagina tambem aceita digitar a senha normalmente. Arquivos noVNC, WebSocket e botoes continuam protegidos.

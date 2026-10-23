@@ -29,12 +29,33 @@ class DesktopProxyTests(unittest.IsolatedAsyncioTestCase):
         self.tmp.cleanup()
 
     async def test_all_routes_require_password(self):
-        for path in ('/', '/vnc.html', '/websockify', '/json/version'):
+        for path in ('/vnc.html', '/websockify', '/json/version'):
             response = await self.client.get(path)
             self.assertEqual(response.status, 401)
         response = await self.client.post('/ready')
         self.assertEqual(response.status, 401)
         self.assertFalse(self.ready.exists())
+
+    async def test_private_link_login_sets_secure_cookie(self):
+        response = await self.client.get('/')
+        self.assertEqual(response.status, 200)
+        html = await response.text()
+        self.assertIn('location.hash', html)
+        self.assertIn('history.replaceState', html)
+        self.assertNotIn('Liberar teste unico', html)
+        response = await self.client.post('/login', json={'token':'wrong'}, headers={'Origin':self.origin})
+        self.assertEqual(response.status, 401)
+        response = await self.client.post('/login', json={'token':'test-only-password-12345'}, headers={'Origin':self.origin})
+        self.assertEqual(response.status, 200)
+        cookie = response.cookies['naruto_desktop']
+        self.assertTrue(cookie['httponly'])
+        self.assertTrue(cookie['secure'])
+        self.assertEqual(cookie['samesite'], 'Strict')
+        # O servidor de teste e HTTP; enviar explicitamente o cookie verifica o controle de acesso.
+        response = await self.client.get('/vnc.html', headers={'Cookie':'naruto_desktop='+cookie.value})
+        self.assertEqual(response.status, 200)
+        response = await self.client.post('/login', json={'token':'test-only-password-12345'}, headers={'Origin':'https://other.example'})
+        self.assertEqual(response.status, 403)
 
     async def test_authenticated_static_and_manual_gate(self):
         response = await self.client.get('/vnc.html', auth=self.auth)

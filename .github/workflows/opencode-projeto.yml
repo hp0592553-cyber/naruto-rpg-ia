@@ -213,7 +213,7 @@ jobs:
           python - <<'PY'
           import urllib.request, urllib.error
           try:
-              urllib.request.urlopen('http://127.0.0.1:6080/', timeout=10)
+              urllib.request.urlopen('http://127.0.0.1:6080/vnc.html', timeout=10)
               raise SystemExit('ERRO: desktop respondeu sem exigir senha')
           except urllib.error.HTTPError as exc:
               assert exc.code == 401
