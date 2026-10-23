@@ -1,0 +1,60 @@
+name: Projeto RPG - verificacao
+
+on:
+  push:
+    branches:
+      - Projeto
+  pull_request:
+    branches:
+      - Projeto
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: projeto-rpg-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar-projeto:
+    name: Validar codigo e historicos
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Baixar branch
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compilar Python sem instalar dependencias
+        run: |
+          python -m compileall -q discord_py_self_mcp scripts
+
+      - name: Conferir registros do RPG
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          required = [
+              Path("HISTORICO_RPG.md"),
+              Path("scripts/rpg_reconectar.py"),
+              Path("discord_py_self_mcp/main.py"),
+          ]
+          missing = [str(path) for path in required if not path.is_file()]
+          if missing:
+              raise SystemExit("Arquivos ausentes: " + ", ".join(missing))
+          print("Arquivos essenciais encontrados.")
+          PY
+
+      - name: Resumo
+        if: always()
+        run: |
+          echo "## Verificacao da branch Projeto" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Verificacao de sintaxe Python e arquivos essenciais." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Nenhuma conexao ao Discord ou token necessario." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Este workflow nao executa jogadas nem comprova ganho de XP." >> "$GITHUB_STEP_SUMMARY"
