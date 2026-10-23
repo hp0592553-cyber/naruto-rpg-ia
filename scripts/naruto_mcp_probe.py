@@ -9,8 +9,9 @@ from mcp.client.stdio import stdio_client
 
 
 async def main():
+    backend = "naruto_browser_mcp.py" if os.getenv("RPG_TRANSPORT") == "browser" else "naruto_guarded_mcp.py"
     params = StdioServerParameters(command=sys.executable,
-        args=[str(Path(__file__).with_name("naruto_guarded_mcp.py").resolve())], env=dict(os.environ))
+        args=[str(Path(__file__).with_name(backend).resolve())], env=dict(os.environ))
     async with stdio_client(params) as (reader, writer):
         async with ClientSession(reader, writer) as session:
             initialized = await session.initialize()

@@ -1,3 +1,5 @@
+> **Naruto Project — branch Projeto:** o workflow agora usa uma tela Linux com Chromium/noVNC e um MCP restrito de interface, sem DISCORD_USER_TOKEN. Consulte [DESKTOP_RPG.md](DESKTOP_RPG.md) para configurar a senha, abrir a tela e liberar o teste unico. O restante deste README documenta a biblioteca original do repositorio.
+
 <p align="center">
   <img src="./logo.png" alt="discord-py-self-mcp" width="100">
 </p>
