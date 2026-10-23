@@ -30,6 +30,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Conferir Secret do Discord sem expor seu valor
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          RPG_DISCORD_SECRET: ${{ secrets.DISCORD_USER_TOKEN }}
+        run: |
+          if [[ -z "$RPG_DISCORD_SECRET" ]]; then
+            echo "::error::Secret DISCORD_USER_TOKEN nao encontrado ou vazio."
+            exit 1
+          fi
+          echo "Secret DISCORD_USER_TOKEN presente. O conteudo nao sera exibido nem enviado a outros servicos."
+          echo "Apenas presenca confirmada; nenhuma autenticacao no Discord foi realizada."
+
       - name: Selecionar modelo gratuito sem consultar Secrets
         shell: bash
         run: |
