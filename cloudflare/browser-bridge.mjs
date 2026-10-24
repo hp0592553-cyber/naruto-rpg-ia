@@ -16,7 +16,7 @@ const GITHUB_HEADERS = token => ({
   "user-agent": "Bushin-Browser-Cloudflare"
 });
 
-const D1_READ_ACTIONS=new Set(["status","read_page_text","rpg_view","rpg_scout","open_url","inspect_ui","scroll"]);
+const D1_READ_ACTIONS=new Set(["status","read_page_text","rpg_view","rpg_scout","open_url","inspect_ui","scroll","screenshot"]);
 async function d1VisualSession(env){
   if(!env.DB?.prepare)return null;
   const now=Date.now();
@@ -44,7 +44,7 @@ async function d1ReadCommand(env,args){
   const stored=await env.DB.prepare("INSERT INTO bushin_visual_commands(id,run_id,owner_id,action,args_json,state,created_at,updated_at) SELECT ?,run_id,owner_id,?,?,'queued',?,? FROM bushin_visual_sessions WHERE run_id=? AND owner_id=? AND expires_at>? AND last_seen>?")
     .bind(id,request.action,JSON.stringify(request),now,now,session.run_id,env.BUSHIN_OWNER_DISCORD_ID,now,now-60000).run();
   if(Number(stored.meta?.changes||0)!==1)return {state:"unavailable",reason:"Sessao visual expirou antes de enfileirar."};
-  return {state:"queued",command_id:id,session_id:session.run_id,action:request.action,note:"Aguardando execucao real do navegador. Consulte bushin_browser_result antes de afirmar que leu mensagens."};
+  return {state:"queued",command_id:id,session_id:session.run_id,action:request.action,note:"Aguardando execucao real do navegador. Consulte bushin_browser_result antes de afirmar que a ação ou captura foi concluída."};
 }
 async function d1ReadResult(env,args){
   if(!env.DB?.prepare)return {state:"unavailable",reason:"Banco D1 indisponivel."};
