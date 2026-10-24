@@ -136,7 +136,7 @@ const readonly=new Set([
 ]);
 export const ADVANCED_TOOLS=specs.filter(([name])=> !["browser_status","discord_whoami"].includes(name)).map(([name,title,keys])=>({
  name:name.startsWith("bushin_")?name:"bushin_"+name,title:"🍥 "+title,
- description:title+". Resultado mostra se há sessão e autorização reais; não confunda ferramenta registrada com acesso ativo.",
+ description:name==="discord_send_message"?"Envia mensagem no canal autorizado pelo transporte configurado: sessão pessoal quando DISCORD_USER_TOKEN existe, ou bot oficial no caminho separado. OAuth sozinho não concede envio. O transporte pessoal é não oficial. confirmed:true exige texto e canal autorizados pelo usuário; só declarar entrega com sent:true, message_id e author_id verificado. Confira mode na resposta; não deduza o autor pelo nome da ferramenta.":title+". Resultado mostra se há sessão e autorização reais; não confunda ferramenta registrada com acesso ativo.",
  inputSchema:{type:"object",properties:Object.fromEntries([...new Set([...keys,
  ...(["browser_tabs","github_read_repo","files_list"].includes(name)?["path"]:[]),
  ...(["browser_type"].includes(name)?["channel_url"]:[]),

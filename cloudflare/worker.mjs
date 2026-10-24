@@ -347,7 +347,7 @@ const TOOLS=[
    inputSchema:{type:"object",properties:{},additionalProperties:false},
    annotations:{readOnlyHint:true,destructiveHint:false}}
 ];
-export const CATALOG_REVISION="2026-10-24.1";
+export const CATALOG_REVISION="2026-10-24.2";
 // Static catalogue: configuration changes affect availability, not tool discovery.
 // No listChanged notification is advertised: this stateless endpoint sends none.
 export function mcpTools(){return TOOLS.concat(BROWSER_TOOLS,BOT_TOOLS,ADVANCED_TOOLS,NARUTO_TOOLS,PERSONAL_TOOLS);}
@@ -365,8 +365,8 @@ async function mcp(req,env){
   const id=body.id??null,method=body.method;
   if(method==="initialize")return rpc(id,{
     protocolVersion:["2024-11-05","2025-03-26","2025-06-18","2025-11-25"].includes(body.params?.protocolVersion)?body.params.protocolVersion:"2025-11-25",capabilities:{tools:{listChanged:false}},
-    serverInfo:{name:"bushin-browser-discord-direct",version:"1.1.0"},
-    instructions:"Bushin Advanced: browser, Discord OAuth, bot oficial opcional, tarefas persistidas no D1, arquivos e GitHub. Ferramentas registradas não garantem sessão ativa; confira os estados retornados. O aplicativo ChatGPT Android skill-only não invoca este MCP. Mensagens Discord por API usam apenas bot oficialmente autorizado."
+    serverInfo:{name:"bushin-browser-discord-direct",version:"1.1.1"},
+    instructions:"Bushin Advanced: browser, Discord OAuth, bot oficial opcional, tarefas persistidas no D1, arquivos e GitHub. Ferramentas registradas não garantem sessão ativa; confira os estados retornados. O aplicativo ChatGPT Android skill-only não invoca este MCP. OAuth identifica o dono e não concede envio por si só. O envio existente usa o transporte configurado: pessoal não oficial quando a Secret pessoal existe, ou bot oficial no caminho separado. Consulte mode e evidências de entrega, nunca apenas o nome ou descrição antiga da ferramenta."
   });
   if(method==="notifications/initialized")return new Response(null,{status:202});
   if(method==="ping")return rpc(id,{});

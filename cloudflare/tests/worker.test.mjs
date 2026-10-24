@@ -81,6 +81,9 @@ test('MCP catalogue is static, unique, and tool schemas are objects',()=>{
  assert.ok(tools.some(t=>t.name==='bushin_naruto_observe'));assert.ok(tools.some(t=>t.name==='bushin_naruto_personal_read'));
  for(const t of tools)assert.equal(t.inputSchema.type,'object');
  assert.equal(catalogDiagnostics().count,tools.length);
+ const send=tools.find(t=>t.name==='bushin_discord_send_message');
+ assert.match(send.description,/sessão pessoal/);assert.match(send.description,/bot oficial/);
+ assert.match(send.description,/Confira mode/);
 });
 test('history cursor advances to older messages and stops on an empty page',async t=>{
  const urls=[];t.mock.method(globalThis,'fetch',async u=>{
