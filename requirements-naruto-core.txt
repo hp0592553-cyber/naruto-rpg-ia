@@ -1,0 +1,9 @@
+# Minimal dependencies for scripts/naruto_guarded_mcp.py and the existing transport.
+# Install in an isolated Python >=3.10 environment; this does not start Discord.
+# Verified with Python 3.12.14 on 2026-10-24.
+# Browser, voice, and CAPTCHA tooling are not required by this script.
+discord.py-self==2.1.0
+discord-protos==0.0.2
+mcp==1.30.0
+python-dotenv==1.2.4
+httpx==0.28.1
