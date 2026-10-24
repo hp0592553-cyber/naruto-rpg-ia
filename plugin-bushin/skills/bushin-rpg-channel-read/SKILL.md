@@ -9,7 +9,7 @@ Preserve o app original e seu `.app.json`. `bushin_session_status` comprova a id
 
 Para ler o canal de comandos `1520114348079583263`, usar `bushin_discord_read_messages({channel_id,limit})` e interpretar `messages[].normalized_text`: as mensagens do Naruto Bot usam Components V2 mesmo quando `content` e `embeds` estão vazios. Não inferir dados de Henrique de perfis de terceiros. Leitura e Key foram confirmadas em 2026-10-24.
 
-Para **enviar**, `bushin_discord_send_message({channel_id,content,confirmed})` foi roteado no Worker para o transporte pessoal quando a Key está configurada; exige `confirmed:true` apenas APÓS aprovação exata do canal e texto. Não executar testes de envio com confirmação sem autorização do usuário. Nenhum envio pessoal real foi confirmado neste turno. Não afirmar sucesso antes de retornar `sent:true`, ID de mensagem e autoria verificada. O caminho visual `bushin_rpg_send_message` continua separado, depende de sessão realmente ativa e confirmação; bot oficial é outro transporte.
+Para **enviar**, `bushin_discord_send_message({channel_id,content,confirmed})` foi roteado no Worker para o transporte pessoal quando a Key está configurada; exige `confirmed:true` apenas APÓS aprovação exata do canal e texto. Não executar testes de envio com confirmação sem autorização do usuário. O envio histórico de “Oi” está documentado abaixo; testes posteriores com confirmed:false não publicaram outra mensagem. Não afirmar sucesso antes de retornar `sent:true`, ID de mensagem e autoria verificada. O caminho visual `bushin_rpg_send_message` continua separado, depende de sessão realmente ativa e confirmação; bot oficial é outro transporte.
 
 Veja a skill `bushin-personal-discord-bridge` para detalhes. Se o Discord estiver indisponível, não fazer tentativas repetitivas nem prometer progresso. O uso de self-bot pode violar os termos do Discord.
 
@@ -34,3 +34,9 @@ Resultado comprovado em 24/10/2026: `state:completed`, `kind:api_message_render`
 Captura da tela original continua sendo outra operação: `bushin_browser_action({action:"screenshot"})`, com sessão D1 visual ativa e resultado verificado por `bushin_browser_result`. Usar somente se o usuário pedir a tela original. Nunca transferir a Key para uma sessão de navegador.
 
 Envio pessoal também foi comprovado nesta conversa: mensagem “Oi”, ID `1563541599189733508`, autor Henrique `481485837801095178`, com releitura confirmando conteúdo e autoria em 24/10/2026. Não repetir esse teste sem pedido. Preservar App, OAuth e Secrets.
+
+## Atualização 1.0.10 — 24/10/2026
+
+A correção de confirmação de entrega está publicada no Worker existente: deployment `6bdfc408cbf54a268e645fa7bc210597`. Uma entrega com sent:true, ID e autor confirmados permanece confirmada mesmo se tracking_saved:false: só o registro D1 falhou. Não reenviar nesse caso. Testes sem publicação retornaram mode:personal_user_token, awaiting_confirmation e sent:false; leitura real voltou a funcionar. Os 23 testes Worker passaram; esses testes simulados não representam 23 ações reais no Discord.
+
+A leitura visual foi confirmada por bushin_browser_action({action:"read_page_text"}) e consulta de resultado; a listagem de abas também funcionou. Se um alias simplificado falhar, isso não comprova que toda a ponte visual parou. Captura real da tela falhou por timeout; imagem de mensagens pela API funcionou. Não reiniciar a sessão para atualizar estas instruções. Não tratar conexão MCP como prova de jogo autônomo.
