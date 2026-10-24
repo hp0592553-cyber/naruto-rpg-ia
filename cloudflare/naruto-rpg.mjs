@@ -54,7 +54,7 @@ async function saved(env,id){
   return r?{snapshot:JSON.parse(r.value_json),updated_at:r.updated_at}:null;
 }
 const plans={
- missions:["Consultar /missoes minhas apenas em sessão autorizada.","Verificar resposta correlacionada do Naruto Bot.","Anotar requisitos antes de escolher outra missão."],
+ missions:["Descobrir o comando atual de missões e seus parâmetros nas regras e no catálogo real.","Verificar resposta correlacionada do Naruto Bot.","Anotar requisitos antes de escolher outra missão."],
  recovery:["Conferir vida, chakra e energia reais.","Verificar as regras oficiais de recuperação.","Não encerrar combate ativo para recuperar recursos."],
  combat:["Conferir combate, recursos e última ação adversária.","Verificar opções reais de ataque, defesa ou movimento.","Não encerrar a luta sem instrução explícita."],
  level20:["Conferir nível e XP informados no jogo.","Verificar pré-requisitos das missões.","Planejar progresso sem declarar níveis ganhos sem evidência."],

@@ -8,7 +8,7 @@ import {botReady,botCall} from "./bot-permissions.mjs";
 import {repoCall} from "./repo-suite.mjs";
 import {stateCall} from "./state-suite.mjs";
 import {discordCall} from "./discord-suite.mjs";
-import {personalCall,personalListChannels} from "./personal-discord.mjs";
+import {personalCall,personalListChannels,personalInspectCommand} from "./personal-discord.mjs";
 import {apiMessageImage} from "./message-image.mjs";
 
 const RPG_GUILD = "1515877468299595919";
@@ -156,6 +156,7 @@ const blocked=(name,reason)=>({state:"unavailable",tool:name,reason,implemented:
 export async function advancedCall(env,name,args={},ctx={}){
  if(!ADVANCED_NAMES.has(name))throw Error("Ferramenta Bushin desconhecida.");
  const simple=["bushin_save_state","bushin_load_state"].includes(name)?name:name.slice(7);
+ if(simple==="discord_execute_command"&&typeof env.DISCORD_USER_TOKEN==="string"&&env.DISCORD_USER_TOKEN.trim().length>=35)return personalInspectCommand(env,args,ctx);
  if(simple==="discord_list_channels"&&typeof env.DISCORD_USER_TOKEN==="string"&&env.DISCORD_USER_TOKEN.trim().length>=35)return personalListChannels(env,ctx);
  if(simple==="browser_screenshot")return apiMessageImage(env,ctx);
  if(simple==="rpg_send_message")return rpgSendVisual(env,args,ctx);

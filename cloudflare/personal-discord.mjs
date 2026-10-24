@@ -143,3 +143,26 @@ export async function personalListChannels(env,ctx={}){
   channels:r.data.slice(0,500).filter(c=>id(c.id)&&[0,4,5,15,16].includes(c.type)).map(c=>({id:c.id,name:String(c.name||"").slice(0,100),type:c.type,parent_id:c.parent_id||null,topic:String(c.topic||"").slice(0,2000),message_read_access:"not_verified"})),
   truncated:r.data.length>500,note:"Metadados retornados pelo Discord. A leitura de cada canal continua sujeita às permissões reais; não lê DMs."};
 }
+
+// Read-only index lookup matching discord.py-self 2.1.0. Never submits interactions.
+export async function personalInspectCommand(env,args={},ctx={}){
+ owner(env,ctx);
+ if(typeof args.command!=="string"||!/^\/[a-z0-9_-]{1,32}( [a-z0-9_-]{1,32}){0,2}$/.test(args.command))throw Error("Informe o caminho do comando, sem valores de parâmetros.");
+ const auth=await authorize(env,ctx);
+ if(auth.state!=="completed")return {...auth,catalog_verified:false,executed:false,sent:false};
+ const channel=await checkChannel(auth.token,"1520114348079583263");
+ if(channel.state!=="completed")return {...channel,catalog_verified:false,executed:false,sent:false};
+ const result=await request(auth.token,"/guilds/"+GUILD+"/application-command-index");
+ if(result.state!=="completed")return {...result,catalog_verified:false,executed:false,sent:false};
+ if(!Array.isArray(result.data?.application_commands))return {state:"unavailable",catalog_verified:false,executed:false,sent:false,reason:"Formato do catálogo não reconhecido."};
+ const option=(o,depth=0)=>({name:String(o.name||"").slice(0,100),type:o.type,description:String(o.description||"").slice(0,500),required:o.required===true,
+  ...(depth<2&&Array.isArray(o.options)?{options:o.options.slice(0,25).map(x=>option(x,depth+1))}:{}),
+  ...(Array.isArray(o.choices)?{choices:o.choices.slice(0,25).map(c=>({name:String(c.name||"").slice(0,100),value:c.value}))}:{})});
+ const commands=result.data.application_commands.filter(c=>String(c.application_id)==="1515908078913192026"&&c.type===1).slice(0,100).map(c=>({id:c.id,version:c.version,...option(c)}));
+ const parts=args.command.slice(1).split(" ");let matched=commands.find(c=>c.name===parts[0]);
+ for(const name of parts.slice(1))matched=matched?.options?.find(o=>[1,2].includes(o.type)&&o.name===name);
+ return {state:matched?"command_found":"command_not_found",mode:"personal_user_token",catalog_verified:true,
+  requested_command:args.command,command_found:!!matched,matched:matched||null,commands,
+  executor_status:"not_connected",executed:false,sent:false,
+  note:"Catálogo real consultado; nenhuma interação enviada. O executor de ações ainda não está conectado."};
+}
