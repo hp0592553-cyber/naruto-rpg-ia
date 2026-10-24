@@ -82,6 +82,17 @@ test('MCP catalogue is static, unique, and tool schemas are objects',()=>{
  for(const t of tools)assert.equal(t.inputSchema.type,'object');
  assert.equal(catalogDiagnostics().count,tools.length);
 });
+test('history cursor advances to older messages and stops on an empty page',async t=>{
+ const urls=[];t.mock.method(globalThis,'fetch',async u=>{
+  urls.push(u);return Response.json(u.endsWith('/users/@me')?{id:OWNER}:u.endsWith('/channels/'+CHANNEL)?{guild_id:'1515877468299595919'}:u.includes('&before=')?[]:[v2]);
+ });
+ const first=await personalCall(env,'bushin_naruto_personal_read',{channel_id:CHANNEL,limit:1},ctx);
+ assert.equal(first.pagination.next_before,v2.id);
+ const second=await personalCall(env,'bushin_naruto_personal_read',{channel_id:CHANNEL,limit:1,before:first.pagination.next_before},ctx);
+ assert.equal(second.pagination.next_before,null);assert.equal(second.messages.length,0);
+ assert.ok(urls.some(u=>u.endsWith('&before='+v2.id)));
+ await assert.rejects(personalCall(env,'bushin_naruto_personal_read',{channel_id:CHANNEL,before:'invalid'},ctx),/Cursor/);
+});
 async function rpc(method,params={}){
  return worker.fetch(new Request('https://example.test/mcp',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})}),env,{});
 }

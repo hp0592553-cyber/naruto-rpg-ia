@@ -1,0 +1,19 @@
+{
+  "apps": "./.app.json",
+  "author": {
+    "name": "App developer"
+  },
+  "description": "Conexão segura do Bushin Browser com minha conta Discord para consultar identidade, servidores e status OAuth.",
+  "interface": {
+    "capabilities": [],
+    "category": "Other",
+    "defaultPrompt": null,
+    "developerName": "App developer",
+    "displayName": "Bushin Discord OAuth",
+    "longDescription": "Conexão segura do Bushin Browser com minha conta Discord para consultar identidade, servidores e status OAuth.",
+    "shortDescription": "Conexão segura do Bushin Browser com minha conta Discord para consultar identidade, servidores e status OAuth."
+  },
+  "name": "dev-6ad68bf2d8b881919051e2ccb5604940",
+  "skills": "./skills",
+  "version": "1.0.8"
+}

@@ -17,7 +17,7 @@ export const PERSONAL_TOOLS=[
    inputSchema:{type:"object",properties:{},additionalProperties:false},annotations:readOnly},
   {name:"bushin_naruto_personal_read",title:"🍥 Ler canal Naruto com sessão pessoal",
    description:"Usa a Secret configurada pelo dono para ler no máximo 12 mensagens de um canal validado do Naruto Project.",
-   inputSchema:{type:"object",properties:{channel_id:{type:"string",pattern:"^[0-9]{15,22}$"},limit:{type:"integer",minimum:1,maximum:12}},required:["channel_id"],additionalProperties:false},annotations:readOnly},
+   inputSchema:{type:"object",properties:{channel_id:{type:"string",pattern:"^[0-9]{15,22}$"},limit:{type:"integer",minimum:1,maximum:12},before:{type:"string",pattern:"^[0-9]{15,22}$"}},required:["channel_id"],additionalProperties:false},annotations:readOnly},
   {name:"bushin_naruto_personal_send",title:"🍥 Enviar mensagem Naruto com sessão pessoal",
    description:"Envia somente mensagem aprovada, em canal validado do Naruto Project, usando a Secret pessoal. Discord não permite self-bots.",
    inputSchema:{type:"object",properties:{channel_id:{type:"string",pattern:"^[0-9]{15,22}$"},text:{type:"string",minLength:1,maxLength:500},confirmed:{type:"boolean"}},required:["channel_id","text","confirmed"],additionalProperties:false},
@@ -94,6 +94,7 @@ export async function personalCall(env,name,args={},ctx={}){
    return {state:secret(env)?"configured_unverified":"not_configured",secret_configured:!!secret(env),
      oauth_id:ctx.me.id,guild_id:GUILD,
      note:"Secret presente não confirma que o Discord aceite a conexão. Sem Key, nada é enviado."};
+ if(args.before!==undefined&&(!id(args.before)||name!=="bushin_naruto_personal_read"))throw Error("Cursor de histórico inválido.");
  const identity=await authorize(env,ctx);
  if(identity.state!=="completed")return {...identity,read:false,sent:false};
  const token=identity.token;
@@ -101,12 +102,15 @@ export async function personalCall(env,name,args={},ctx={}){
  if(access.state!=="completed")return {...access,read:false,sent:false};
  if(name==="bushin_naruto_personal_read"){
    const limit=Number.isInteger(args.limit)?Math.max(1,Math.min(12,args.limit)):8;
-   const r=await request(token,"/channels/"+args.channel_id+"/messages?limit="+limit);
+   const r=await request(token,"/channels/"+args.channel_id+"/messages?limit="+limit+(args.before?"&before="+encodeURIComponent(args.before):""));
    if(r.state!=="completed")return {...r,read:false};
    if(!Array.isArray(r.data))return {state:"unavailable",reason:"Resposta inesperada do Discord.",read:false};
    const messages=r.data.map(m=>normalizeMessage(m,{channelId:args.channel_id}));
    return {state:"completed",read:true,guild_id:GUILD,channel_id:args.channel_id,
-     messages,rpg_observation:observeNaruto(messages,ctx.me.id)};
+     messages,pagination:{requested_before:args.before||null,page_size:limit,returned:messages.length,
+       next_before:messages.length===limit&&messages.every(m=>id(m.id)&&(!args.before||BigInt(m.id)<BigInt(args.before)))?messages.reduce((old,m)=>BigInt(m.id)<BigInt(old)?m.id:old,messages[0].id):null,
+       scope:"accessible_channel_history",note:"A full page may have older results; follow next_before until null. Deleted and ephemeral messages are not included."},
+     rpg_observation:observeNaruto(messages,ctx.me.id)};
  }
  if(args.confirmed!==true)return {state:"awaiting_confirmation",sent:false,reason:"Confirmação exata exigida."};
  const message=args.text;

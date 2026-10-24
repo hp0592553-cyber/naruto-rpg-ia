@@ -80,7 +80,7 @@ const specs=[
  ["discord_list_servers","Servidores autorizados via OAuth",[]],
  ["discord_list_channels","Canais permitidos ao bot",[]],
  ["discord_read_messages","Ler mensagens Naruto e componentes com diagnóstico do transporte",["channel_id"]],
- ["discord_send_message","Enviar como bot autorizado",["channel_id","content","confirmed"]],
+ ["discord_send_message","Enviar mensagem confirmada no canal Naruto (transporte pessoal se configurado, senão bot autorizado)",["channel_id","content","confirmed"]],
  ["discord_create_dm","Preparar DM autorizada de bot",["recipient_id","confirmed"]],
  ["discord_send_dm","Enviar DM de bot autorizada",["recipient_id","content","confirmed"]],
  ["discord_execute_command","Orientar comando de aplicativo",["command"]],
@@ -113,6 +113,7 @@ const specs=[
  ["ui_live_panel","Estado do painel visual",[]]
 ];
 const property={
+ before:{type:"string",pattern:"^[0-9]{15,22}$",description:"Cursor next_before da página anterior; histórico anterior a este ID."},
  channel_url:{type:"string",minLength:48,maxLength:180,description:"URL completa https://discord.com/channels/1515877468299595919/ID"},
  command_id:{type:"string",pattern:"^visual_[a-f0-9]{32}$"},
  limit:{type:"integer",minimum:1,maximum:30},confirmed:{type:"boolean"},x:{type:"integer",minimum:0,maximum:1364},
@@ -143,6 +144,7 @@ export const ADVANCED_TOOLS=specs.filter(([name])=> !["browser_status","discord_
  ...(["task_start"].includes(name)?["description","steps"]:[]),
  ...(["task_resume"].includes(name)?["confirmed"]:[]),
  ...(["discord_read_messages","audit_log"].includes(name)?["limit"]:[]),
+ ...(name==="discord_read_messages"?["before"]:[]),
  ...(["task_status","task_logs"].includes(name)?[]:[])
  ])].map(k=>[k, property[k]|| (k==="tab_index"?{type:"integer",minimum:0,maximum:20}:k==="steps"?{type:"array",maxItems:12,items:{type:"string",maxLength:120}}:{type:"string",maxLength:1200})])),
  required:keys,additionalProperties:false},
@@ -180,6 +182,8 @@ export async function advancedCall(env,name,args={},ctx={}){
  }
  if(simple==="discord_read_messages"&&typeof env.DISCORD_USER_TOKEN==="string"&&env.DISCORD_USER_TOKEN.trim().length>=35)
     return {mode:"personal_user_token",...(await personalCall(env,"bushin_naruto_personal_read",args,ctx))};
+ if(simple==="discord_send_message"&&typeof env.DISCORD_USER_TOKEN==="string"&&env.DISCORD_USER_TOKEN.trim().length>=35)
+    return {mode:"personal_user_token",...(await personalCall(env,"bushin_naruto_personal_send",{channel_id:args.channel_id,text:args.content,confirmed:args.confirmed},ctx))};
   if(simple.startsWith("discord_"))return discordCall(env,simple,args,ctx);
  if(simple.startsWith("task_")||simple.startsWith("bushin_")||["permissions_check","audit_log","auth_status","auth_connect","auth_disconnect"].includes(simple))
    return stateCall(env,simple,args,ctx);

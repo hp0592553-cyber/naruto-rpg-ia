@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "dev-6ad68bf2d8b881919051e2ccb5604940",
+  "version": "1.0.8",
+  "description": "Conexão segura do Bushin Browser com minha conta Discord para consultar identidade, servidores e status OAuth.",
+  "author": {
+    "name": "App developer"
+  },
+  "extensions": {
+    "com.openai": {
+      "apps": "./.app.json",
+      "interface": {
+        "capabilities": [],
+        "category": "Other",
+        "defaultPrompt": null,
+        "developerName": "App developer",
+        "displayName": "Bushin Discord OAuth",
+        "longDescription": "Conexão segura do Bushin Browser com minha conta Discord para consultar identidade, servidores e status OAuth.",
+        "shortDescription": "Conexão segura do Bushin Browser com minha conta Discord para consultar identidade, servidores e status OAuth."
+      }
+    }
+  }
+}
