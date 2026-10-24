@@ -26,7 +26,7 @@ Este inventário descreve a branch Projeto e os testes desta conversa. Não afir
 
 ## Correção desta etapa
 
-Após o Discord confirmar ID e autor, uma falha ao registrar o envio no D1 não deve apagar a evidência de entrega. O retorno mantém sent:true e os identificadores, informa tracking_saved:false e orienta não repetir. O transporte, as credenciais e o conteúdo enviado não foram trocados. Esta alteração foi testada com rede e banco simulados; exige publicação no Worker para valer ao vivo.
+Após o Discord confirmar ID e autor, uma falha ao registrar o envio no D1 não deve apagar a evidência de entrega. O retorno mantém sent:true e os identificadores, informa tracking_saved:false e orienta não repetir. O transporte, as credenciais e o conteúdo enviado não foram trocados. Esta alteração foi testada com rede e banco simulados; foi publicada no Worker existente (deployment 6bdfc408cbf54a268e645fa7bc210597), preservando os outros 12 módulos e bindings. Após a publicação, leitura e rota de envio sem publicação foram novamente consultadas.
 
 ## Testes
 
@@ -37,4 +37,4 @@ Após o Discord confirmar ID e autor, uma falha ao registrar o envio no D1 não 
 
 ## Pendências
 
-Publicar a correção de confirmação de entrega; investigar erros intermitentes OAuth nas ferramentas simplificadas, timeout de screenshot e sincronização do catálogo; validar slash commands e lógica de jogo ponta a ponta. Leitura, conexão MCP ou um envio de texto não comprovam jogo autônomo nem nível 20.
+Investigar erros intermitentes OAuth nas ferramentas simplificadas, timeout de screenshot e sincronização do catálogo; validar slash commands e lógica de jogo ponta a ponta. Leitura, conexão MCP ou um envio de texto não comprovam jogo autônomo nem nível 20.
