@@ -30,6 +30,17 @@ jobs:
       - name: "Instalar dependência de captura"
         run: npm ci --prefix browser_actions/snapshot-deps --ignore-scripts --omit=dev
 
+      - name: "Preparar upload de capturas no processo Linux"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            for (const key of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RESULTS_URL']) {
+              const value = process.env[key];
+              if (!value) throw new Error('Artifact runtime unavailable: ' + key);
+              if (key.endsWith('TOKEN')) core.setSecret(value);
+              core.exportVariable(key, value);
+            }
+
       - name: "Testar controles antes de abrir desktop"
         run: |
           python -m unittest -v test_oidc_controls.py test_live_controls.py
