@@ -188,6 +188,12 @@ def process(*args, env=None):
 
 async def start():
     from oidc_listener import register_runner, publish_takeover
+    # The controller runs in this Python process; it needs the same X11 DISPLAY
+    # as the headed Chromium and x11vnc children for true framebuffer health.
+    os.environ["DISPLAY"] = DISPLAY
+    os.environ["XDG_SESSION_TYPE"] = "x11"
+    os.environ["GDK_BACKEND"] = "x11"
+    os.environ.pop("WAYLAND_DISPLAY", None)
     await register_runner()
     secret = secrets.token_urlsafe(40)
     # Do not pass GitHub API credentials to any browser/desktop subprocess.
