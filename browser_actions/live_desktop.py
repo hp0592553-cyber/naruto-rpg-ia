@@ -167,7 +167,9 @@ def focus_chromium_window(env):
         for cmd in (
             ["xdotool", "windowmap", window],
             ["xdotool", "windowmove", window, "0", "0"],
+            ["xdotool", "windowsize", window, "1300", "700"],
             ["xdotool", "windowactivate", "--sync", window],
+            ["xdotool", "windowraise", window],
         ):
             result = subprocess.run(cmd, env=env, capture_output=True, timeout=8)
             if result.returncode != 0:
@@ -192,6 +194,9 @@ async def start():
     privileged = {"GH_TOKEN", "GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL"}
     env = {k: v for k, v in os.environ.items() if k not in privileged}
     env["DISPLAY"] = DISPLAY
+    env["XDG_SESSION_TYPE"] = "x11"
+    env["GDK_BACKEND"] = "x11"
+    env.pop("WAYLAND_DISPLAY", None)
     processes = []
     browser_profile = Path("/tmp/bushin-private-discord-profile")
     browser_profile.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -206,9 +211,10 @@ async def start():
         subprocess.run(["xsetroot", "-display", DISPLAY, "-solid", "#23324c"],
                        env=env, capture_output=True, timeout=8, check=True)
         processes.append(process("openbox", env=env))
+        await asyncio.sleep(1)
         processes.append(process(
             "x11vnc", "-display", DISPLAY, "-localhost", "-forever",
-            "-noxdamage", "-shared", "-nopw", "-rfbport", "5900", "-quiet", env=env))
+            "-noxdamage", "-wait", "10", "-defer", "10", "-shared", "-nopw", "-rfbport", "5900", "-quiet", env=env))
         processes.append(process(
             "websockify", "--web", VNC_DIR, "127.0.0.1:6081", "127.0.0.1:5900", env=env))
 
@@ -219,7 +225,8 @@ async def start():
         await pw.stop()
         chromium_args = (
             chromium_bin, "--no-sandbox", "--disable-dev-shm-usage",
-            "--disable-gpu", "--disable-gpu-compositing", "--window-position=0,0",
+            "--disable-gpu", "--ozone-platform=x11", "--window-position=0,0",
+            "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
             "--start-maximized",
             "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222",
             "--no-first-run", "--disable-default-apps", "--disable-features=MediaRouter",
