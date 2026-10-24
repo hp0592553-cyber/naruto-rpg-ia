@@ -11,7 +11,7 @@ WORKER = "https://bushin-discord-direct.henrique-silva081106.workers.dev"
 AUDIENCE = "bushin-cloudflare-visual-v1"
 READ_ACTIONS = frozenset({"status", "read_page_text", "rpg_view", "rpg_scout",
                          "inspect_ui", "open_url", "scroll", "press", "type_search",
-                         "click", "rpg_slash"})
+                         "click", "rpg_slash", "screenshot"})
 _state = {}
 
 
@@ -81,6 +81,10 @@ async def listen_commands():
                 if action not in READ_ACTIONS:
                     raise ValueError("Action disabled in OIDC listener; use secure viewer")
                 data = await perform(action, command)
+                if action == "status":
+                    data["listener_capabilities"] = sorted(READ_ACTIONS)
+                    data["listener_revision"] = "2026-10-24-controls-1"
+                    data["typing_scope"] = "search_only"
                 if len(json.dumps(data, ensure_ascii=False)) > 11000:
                     data = {"truncated": True,
                             "preview": json.dumps(data, ensure_ascii=False)[:9500]}
