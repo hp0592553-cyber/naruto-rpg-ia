@@ -11,7 +11,7 @@ WORKER = "https://bushin-discord-direct.henrique-silva081106.workers.dev"
 AUDIENCE = "bushin-cloudflare-visual-v1"
 READ_ACTIONS = frozenset({"status", "read_page_text", "rpg_view", "rpg_scout",
                          "inspect_ui", "open_url", "scroll", "press", "type_search",
-                         "rpg_slash"})
+                         "click", "rpg_slash"})
 _state = {}
 
 
