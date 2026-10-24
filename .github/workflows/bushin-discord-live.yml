@@ -1,0 +1,61 @@
+name: "🍥 Bushin — Naruto RPG (Cloudflare OIDC)"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: bushin-oidc-live
+  cancel-in-progress: false
+
+jobs:
+  desktop:
+    name: "Navegador Linux privado do Naruto Project"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: "Baixar código do Naruto RPG"
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: "Configurar Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: "Verificar código do executor"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile browser_actions/oidc_listener.py
+          python -m py_compile browser_actions/live_controller.py
+          python -m py_compile browser_actions/live_desktop.py
+
+      - name: "Instalar desktop Linux e navegador"
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            xvfb x11vnc openbox novnc websockify
+          python -m pip install 'aiohttp==3.11.18' 'playwright==1.56.0'
+          python -m playwright install chromium --with-deps
+          curl --fail --location --retry 3 \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            --output "$RUNNER_TEMP/cloudflared"
+          chmod 700 "$RUNNER_TEMP/cloudflared"
+          "$RUNNER_TEMP/cloudflared" --version
+
+      - name: "🍥 Conectar sessão ao Bushin via OIDC"
+        shell: bash
+        env:
+          CLOUDFLARED_BIN: \${{ runner.temp }}/cloudflared
+        run: |
+          set -euo pipefail
+          echo "Iniciando navegador temporário, conectado pela ponte Cloudflare D1."
+          echo "O login do Discord será manual e somente na janela protegida."
+          python -u browser_actions/live_desktop.py
