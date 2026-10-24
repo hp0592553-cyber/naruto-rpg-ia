@@ -80,10 +80,16 @@ def validate_command(command, run_id):
     if not isinstance(ident, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", ident):
         raise ValueError("Invalid command id")
     action = command.get("action")
-    if action not in ("status", "open_url", "read_page_text", "scroll", "click_navigation", "screenshot", "click", "press", "inspect_ui", "type_search", "capture_gallery", "rpg_scout", "rpg_view"):
+    if action not in ("status", "open_url", "read_page_text", "scroll", "click_navigation", "screenshot", "click", "press", "inspect_ui", "type_search", "capture_gallery", "rpg_scout", "rpg_view", "rpg_slash"):
         raise ValueError("Unsupported action: use status, RPG scout/view, gallery, and authorized navigation/reading")
     if action == "open_url":
         validate_url(command.get("url"))
+    if action == "rpg_slash":
+        validate_url(command.get("url"))
+        if command.get("command") not in (
+            "/perfil ver", "/missoes minhas", "/missoes ativas",
+        ):
+            raise ValueError("Only safe character and quest status slash commands are permitted")
     if action == "capture_gallery":
         validate_gallery_urls(command.get("urls"))
     if action == "rpg_scout":
@@ -362,6 +368,88 @@ def desktop_display_health():
     return detail
 
 
+async def run_readonly_rpg_slash(page, text):
+    """Perform a narrowly allowlisted slash interaction in the visible Discord UI.
+
+    Does not call Discord HTTP APIs. Refuses when there is a user's existing draft
+    or Discord fails to show matching slash autocomplete suggestions.
+    """
+    assert_rp_channel(page.url)
+    if text not in ("/perfil ver", "/missoes minhas", "/missoes ativas"):
+        raise ValueError("RPG command not on readonly allowlist")
+    root, subcommand = text[1:].split(" ", 1)
+    editors = page.locator(
+        'div[role="textbox"][contenteditable="true"], '
+        '[data-slate-editor="true"][contenteditable="true"]'
+    )
+    editor = None
+    for index in range(min(await editors.count(), 6)):
+        element = editors.nth(index)
+        if not await element.is_visible():
+            continue
+        attrs = await element.evaluate("""el => ({
+            label: (el.getAttribute('aria-label') || '').toLowerCase(),
+            region: !!el.closest('[role="main"], main, form')
+        })""")
+        if attrs.get("region") or "mensagem" in attrs.get("label") or "message" in attrs.get("label"):
+            editor = element
+            break
+    if editor is None:
+        return {"executed": False, "stage": "composer_missing",
+                "note": "Discord chat input was not visibly found"}
+    existing = (await editor.inner_text()).strip()
+    if existing:
+        return {"executed": False, "stage": "existing_draft",
+                "note": "Refused to overwrite an existing user's draft"}
+
+    async def menu_text():
+        return await page.evaluate("""() => {
+            const nodes = [...document.querySelectorAll('[class*="autocomplete"], [role="listbox"]')];
+            return nodes.filter(el => {
+                const r = el.getBoundingClientRect();
+                return r.width>80 && r.height>15 && r.bottom>0;
+            }).map(el => (el.innerText || '').slice(0,1000)).join(' ').slice(0,1500);
+        }""")
+
+    await editor.click()
+    await page.keyboard.type("/" + root, delay=55)
+    await page.wait_for_timeout(1100)
+    menu_root = await menu_text()
+    if root.lower() not in menu_root.lower():
+        return {"executed": False, "stage": "root_autocomplete_missing",
+                "note": "Did not find verified command in Discord slash suggestions",
+                "autocomplete_preview": menu_root[:380]}
+    await page.keyboard.press("Tab")
+    await page.wait_for_timeout(400)
+    await page.keyboard.type(subcommand, delay=65)
+    await page.wait_for_timeout(850)
+    menu_sub = await menu_text()
+    if subcommand.lower() not in menu_sub.lower():
+        return {"executed": False, "stage": "subcommand_autocomplete_missing",
+                "autocomplete_preview": menu_sub[:380],
+                "note": "Refused to submit an unverified subcommand"}
+    await page.keyboard.press("Tab")
+    await page.wait_for_timeout(350)
+    state_before = await extract_rpg_view(page)
+    # Submit exactly once through the user's Discord client UI. This is a
+    # status-only slash action and can never end combat or spend inventory.
+    await page.keyboard.press("Enter")
+    await page.wait_for_timeout(2500)
+    state_after = await extract_rpg_view(page)
+    before_texts = [x.get("text","") for x in state_before.get("messages",[])]
+    recent = state_after.get("messages", [])
+    change = [x for x in recent if x.get("text","") not in before_texts]
+    composer_after = (await editor.inner_text()).strip()[:120]
+    return {
+        "executed": bool(change) and not composer_after,
+        "submitted_once": True,
+        "command": text,
+        "new_visible_messages": change[-4:],
+        "composer_remaining": composer_after,
+        "note": "Submitted once in Chromium; verify RPG bot response. An empty message diff does not prove slash execution."
+    }
+
+
 async def perform(action, command):
     from playwright.async_api import async_playwright
     async with async_playwright() as pw:
@@ -371,6 +459,12 @@ async def perform(action, command):
             current_url = redacted_page_url(page.url)
             if action == "rpg_view":
                 return await extract_rpg_view(page)
+            if action == "rpg_slash":
+                url = validate_url(command["url"])
+                if page.url != url:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=22000)
+                    await page.wait_for_timeout(1000)
+                return await run_readonly_rpg_slash(page, command["command"])
             if action == "rpg_scout":
                 return await scout_rpg_channels(page, command["urls"])
             if action == "inspect_ui":
