@@ -130,3 +130,16 @@ export async function personalCall(env,name,args={},ctx={}){
    .bind(ctx.me.id,key,JSON.stringify({at:stamp,id:mid}),stamp).run();
  return {state:"completed",sent:true,message_id:mid,channel_id:args.channel_id,author_id:ctx.me.id};
 }
+
+/** Read-only guild channel metadata; each message read still checks access. */
+export async function personalListChannels(env,ctx={}){
+ owner(env,ctx);
+ const auth=await authorize(env,ctx);
+ if(auth.state!=="completed")return {...auth,listed:false};
+ const r=await request(auth.token,"/guilds/"+GUILD+"/channels");
+ if(r.state!=="completed")return {...r,listed:false};
+ if(!Array.isArray(r.data))return {state:"unavailable",listed:false,reason:"Resposta de canais inválida."};
+ return {state:"completed",mode:"personal_user_token",listed:true,guild_id:GUILD,
+  channels:r.data.slice(0,500).filter(c=>id(c.id)&&[0,4,5,15,16].includes(c.type)).map(c=>({id:c.id,name:String(c.name||"").slice(0,100),type:c.type,parent_id:c.parent_id||null,topic:String(c.topic||"").slice(0,2000),message_read_access:"not_verified"})),
+  truncated:r.data.length>500,note:"Metadados retornados pelo Discord. A leitura de cada canal continua sujeita às permissões reais; não lê DMs."};
+}
