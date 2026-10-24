@@ -53,7 +53,7 @@ jobs:
       - name: "🍥 Conectar sessão ao Bushin via OIDC"
         shell: bash
         env:
-          CLOUDFLARED_BIN: \${{ runner.temp }}/cloudflared
+          CLOUDFLARED_BIN: ${{ runner.temp }}/cloudflared
         run: |
           set -euo pipefail
           echo "Iniciando navegador temporário, conectado pela ponte Cloudflare D1."
