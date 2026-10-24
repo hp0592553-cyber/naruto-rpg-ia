@@ -80,7 +80,7 @@ def validate_command(command, run_id):
     if not isinstance(ident, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", ident):
         raise ValueError("Invalid command id")
     action = command.get("action")
-    if action not in ("status", "open_url", "read_page_text", "scroll", "click_navigation", "screenshot", "click", "press", "inspect_ui", "type_search", "capture_gallery", "rpg_scout", "rpg_view", "rpg_slash"):
+    if action not in ("tabs", "status", "open_url", "read_page_text", "scroll", "click_navigation", "screenshot", "click", "press", "inspect_ui", "type_search", "capture_gallery", "rpg_scout", "rpg_view", "rpg_slash"):
         raise ValueError("Unsupported action: use status, RPG scout/view, gallery, and authorized navigation/reading")
     if action == "open_url":
         validate_url(command.get("url"))
@@ -459,6 +459,19 @@ async def perform(action, command):
         try:
             page = await get_page(browser)
             current_url = redacted_page_url(page.url)
+            if action == "tabs":
+                pages = [p for ctx in browser.contexts for p in ctx.pages]
+                if command.get("path") == "new":
+                    page = await browser.contexts[0].new_page()
+                    await page.goto("https://www.google.com/search?q=Naruto+Project+RPG", wait_until="domcontentloaded", timeout=22000)
+                    await page.bring_to_front()
+                    return {"opened":True,"url":page.url,"title":await page.title()}
+                index = command.get("tab_index")
+                if index is not None:
+                    if type(index) is not int or not 0 <= index < len(pages):
+                        raise ValueError("Invalid tab index")
+                    await pages[index].bring_to_front()
+                return {"tabs":[{"index":i,"url":redacted_page_url(p.url)} for i,p in enumerate(pages)]}
             if action == "rpg_view":
                 return await extract_rpg_view(page)
             if action == "rpg_slash":
