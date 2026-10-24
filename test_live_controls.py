@@ -79,3 +79,15 @@ class ControlTests(IsolatedAsyncioTestCase):
         uploaded=run.call_args.args[0][2]
         self.assertFalse(Path(uploaded).exists())
 
+
+class TabSelectionTests(IsolatedAsyncioTestCase):
+    async def test_selected_search_wins_over_login_tab_order(self):
+        search=SimpleNamespace(url="https://www.google.com/search?q=test")
+        login=SimpleNamespace(url="https://discord.com/login")
+        controls._selected_page_url=search.url
+        try:
+            for pages in ([search,login],[login,search]):
+                browser=SimpleNamespace(contexts=[SimpleNamespace(pages=pages)])
+                self.assertIs(await controls.get_page(browser),search)
+        finally:
+            controls._selected_page_url=None

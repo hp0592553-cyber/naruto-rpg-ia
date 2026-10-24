@@ -22,6 +22,7 @@ REPO = "hp0592553-cyber/naruto-rpg-ia"
 COMMAND_FILE = "browser_actions/live_command.json"
 RESULT_FILE = "browser_actions/live_result.json"
 GUILD_ID = "1515877468299595919"
+_selected_page_url = None
 
 def validate_url(url):
     if not isinstance(url, str) or len(url) > 1200:
@@ -173,6 +174,10 @@ async def get_page(browser):
     pages = [p for context in browser.contexts for p in context.pages]
     if not pages:
         raise RuntimeError("No open browser page")
+    if _selected_page_url:
+        for page in pages:
+            if page.url == _selected_page_url:
+                return page
     guild_path = "/channels/" + GUILD_ID
     for page in reversed(pages):
         parsed = urlsplit(page.url)
@@ -468,6 +473,7 @@ async def run_readonly_rpg_slash(page, text):
 
 
 async def perform(action, command):
+    global _selected_page_url
     from playwright.async_api import async_playwright
     async with async_playwright() as pw:
         browser = await pw.chromium.connect_over_cdp("http://127.0.0.1:9222", timeout=9000)
@@ -480,12 +486,14 @@ async def perform(action, command):
                     page = await browser.contexts[0].new_page()
                     await page.goto("https://www.google.com/search?q=Naruto+Project+RPG", wait_until="domcontentloaded", timeout=22000)
                     await page.bring_to_front()
+                    _selected_page_url = page.url
                     return {"opened":True,"url":page.url,"title":await page.title()}
                 index = command.get("tab_index")
                 if index is not None:
                     if type(index) is not int or not 0 <= index < len(pages):
                         raise ValueError("Invalid tab index")
                     await pages[index].bring_to_front()
+                    _selected_page_url = pages[index].url
                 return {"tabs":[{"index":i,"url":redacted_page_url(p.url)} for i,p in enumerate(pages)]}
             if action == "rpg_view":
                 return await extract_rpg_view(page)
