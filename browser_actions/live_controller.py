@@ -317,6 +317,51 @@ async def scout_rpg_channels(page, urls):
     return {"checked": len(readings), "channels": readings, "restored_to": redacted_page_url(original),
             "note": "Only rendered RP channel message bodies/forum topics; private GitHub result history. No posting."}
 
+def desktop_display_health():
+    """Return only non-sensitive X11 diagnostics, never raw desktop pixels."""
+    detail = {"display": os.environ.get("DISPLAY", "(unset)")}
+    try:
+        proc = subprocess.run(
+            ["xdotool", "search", "--onlyvisible", "--class", "Chromium"],
+            capture_output=True, text=True, timeout=6)
+        detail["chromium_visible_windows"] = len(
+            [w for w in proc.stdout.splitlines() if w.strip().isdigit()])
+    except (OSError, subprocess.TimeoutExpired):
+        detail["chromium_visible_windows"] = None
+    try:
+        proc = subprocess.run(
+            ["xdotool", "getactivewindow"],
+            capture_output=True, text=True, timeout=6)
+        detail["active_window_known"] = proc.returncode == 0 and proc.stdout.strip().isdigit()
+    except (OSError, subprocess.TimeoutExpired):
+        detail["active_window_known"] = False
+    try:
+        # Sample Xvfb's real framebuffer, not Chromium DevTools screenshot.
+        # Return color statistics only: never transmit account images or credentials.
+        from mss import mss
+        with mss() as screen:
+            grab = screen.grab(screen.monitors[1])
+            raw = grab.bgra
+            stride = max(1, len(raw) // (4 * 3500))
+            colors = set()
+            total = nonblack = root_blue = 0
+            for index in range(0, len(raw) - 3, 4 * stride):
+                b, g, r = raw[index], raw[index + 1], raw[index + 2]
+                total += 1
+                nonblack += max(r, g, b) > 28
+                root_blue += 25 <= r <= 45 and 38 <= g <= 65 and 62 <= b <= 95
+                colors.add((r // 16, g // 16, b // 16))
+            detail["framebuffer"] = {
+                "resolution": str(grab.width) + "x" + str(grab.height),
+                "nonblack_percent": round(100 * nonblack / max(total, 1), 1),
+                "root_background_percent": round(100 * root_blue / max(total, 1), 1),
+                "color_groups": len(colors)
+            }
+    except Exception as exc:
+        detail["framebuffer_error"] = type(exc).__name__
+    return detail
+
+
 async def perform(action, command):
     from playwright.async_api import async_playwright
     async with async_playwright() as pw:
@@ -373,7 +418,7 @@ async def perform(action, command):
                 public_url = public_url_file.read_text(encoding="utf-8").strip() if public_url_file.is_file() else ""
                 if not re.fullmatch(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com/vnc\.html\?autoconnect=1&resize=scale", public_url):
                     public_url = ""
-                return {"online": True, "url": current_url, "title": (await page.title())[:180], "public_entry_url": public_url}
+                return {"online": True, "url": current_url, "title": (await page.title())[:180], "public_entry_url": public_url, "x11": await asyncio.to_thread(desktop_display_health)}
             if action == "open_url":
                 address = validate_url(command["url"])
                 await page.goto(address, wait_until="domcontentloaded", timeout=22000)
