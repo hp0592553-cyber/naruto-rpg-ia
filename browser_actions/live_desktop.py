@@ -181,6 +181,46 @@ def focus_chromium_window(env):
         print("Bushin display: window focus unavailable: " + type(exc).__name__, flush=True)
 
 
+def chromium_visible(env):
+    """True only when Chromium has a mapped X11 window for noVNC."""
+    try:
+        proc = subprocess.run(
+            ["xdotool", "search", "--onlyvisible", "--class",
+             "(Chromium|chromium|Chrome|chrome)"],
+            env=env, capture_output=True, text=True, timeout=5)
+        return proc.returncode == 0 and any(
+            item.strip().isdigit() for item in proc.stdout.splitlines())
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+async def restore_chromium_if_hidden(env, chromium_bin, browser_profile):
+    """Repair a minimized/hidden Chromium window without discarding the profile."""
+    if await asyncio.to_thread(chromium_visible, env):
+        return True
+    print("🍥 Tela preta detectada: Chromium sem janela visível. Restaurando X11...", flush=True)
+    await asyncio.to_thread(focus_chromium_window, env)
+    if await asyncio.to_thread(chromium_visible, env):
+        print("🍥 A janela oculta foi restaurada no noVNC.", flush=True)
+        return True
+    # If all X11 windows were destroyed but CDP is still alive, reopen a window
+    # in the same profile instead of killing the browser or losing Discord login.
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            [chromium_bin, "--no-sandbox", "--disable-gpu", "--ozone-platform=x11",
+             "--user-data-dir=" + str(browser_profile), "--new-window",
+             "https://discord.com/channels/1515877468299595919/1520114348079583263"],
+            capture_output=True, timeout=12, env=env)
+        if proc.returncode != 0:
+            print("🍥 O Chromium recusou abrir uma janela adicional.", flush=True)
+    except (OSError, subprocess.TimeoutExpired):
+        print("🍥 Não foi possível solicitar nova janela; tentativa seguinte em 10 segundos.", flush=True)
+    await asyncio.sleep(2)
+    await asyncio.to_thread(focus_chromium_window, env)
+    return await asyncio.to_thread(chromium_visible, env)
+
+
 def process(*args, env=None):
     return subprocess.Popen(
         list(args), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -242,6 +282,8 @@ async def start():
         processes.append(process(*chromium_args, env=env))
         await asyncio.sleep(4)
         focus_chromium_window(env)
+        if not await restore_chromium_if_hidden(env, chromium_bin, browser_profile):
+            print("🍥 AVISO: navegador abriu, mas ainda não há janela visível no X11.", flush=True)
         if any(p.poll() is not None for p in processes):
             raise RuntimeError("Um processo do desktop terminou antes de iniciar")
 
@@ -299,14 +341,19 @@ async def start():
         started = time.monotonic()
         browser_disconnects = 0
         browser_restarts = 0
+        last_logged_minute = -1
         while time.monotonic() - started < MAX_SECONDS:
-            await asyncio.sleep(30)
+            await asyncio.sleep(10)
             if controller_task.done():
                 raise RuntimeError("The browser command receiver stopped")
             if tunnel.poll() is not None:
                 raise RuntimeError("Tunel seguro foi encerrado")
             if any(p.poll() is not None for p in processes[:4]):
                 raise RuntimeError("Desktop ou servidor VNC parou")
+            # Users can minimize or hide Chromium in noVNC; keep restoring the
+            # very same window and Discord profile instead of leaving a black screen.
+            if not await restore_chromium_if_hidden(env, chromium_bin, browser_profile):
+                print("🍥 ALERTA: framebuffer segue sem janela Chromium visível.", flush=True)
             try:
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection("127.0.0.1", 9222), timeout=4)
@@ -333,8 +380,9 @@ async def start():
                     browser_restarts += 1
                     browser_disconnects = 0
             minutes = int((time.monotonic() - started) / 60)
-            if minutes % 5 == 0:
+            if minutes % 5 == 0 and minutes != last_logged_minute:
                 print("🍥 Linux online - %s min decorridos" % minutes, flush=True)
+                last_logged_minute = minutes
         print("Limite da sessao encerrado. Fechando navegador.", flush=True)
     finally:
         if controller_task is not None:
