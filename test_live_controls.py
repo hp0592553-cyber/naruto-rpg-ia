@@ -16,6 +16,12 @@ class ValidationTests(TestCase):
             with self.assertRaises(ValueError):
                 controls.validate_command({"id":"test","session_id":"42","action":"type_search","text":text},"42")
 
+    def test_public_search_allowed(self):
+        controls.assert_control_page("https://www.google.com/search?q=Naruto")
+        for url in ("https://accounts.google.com/", "https://discord.com/login", "https://www.google.com.evil.test/search"):
+            with self.assertRaises(ValueError):
+                controls.assert_control_page(url)
+
     def test_wrong_session_rejected(self):
         with self.assertRaises(ValueError):
             controls.validate_command({"id":"test","session_id":"other","action":"click","x":4,"y":4},"42")
@@ -27,14 +33,14 @@ class ValidationTests(TestCase):
 
 class ControlTests(IsolatedAsyncioTestCase):
     async def test_navigation_click_executes(self):
-        page = SimpleNamespace(url=URL, evaluate=AsyncMock(return_value={"allowed":True}),
+        page = SimpleNamespace(url=URL, locator=lambda _:SimpleNamespace(count=AsyncMock(return_value=0)), evaluate=AsyncMock(return_value={"allowed":True}),
             mouse=SimpleNamespace(click=AsyncMock()), wait_for_timeout=AsyncMock())
         result = await controls.safe_point_click(page, 50, 70)
         self.assertEqual(result["clicked"], [50,70])
         page.mouse.click.assert_awaited_once()
 
     async def test_sensitive_click_never_executes(self):
-        page = SimpleNamespace(url=URL, evaluate=AsyncMock(return_value={"allowed":False}),
+        page = SimpleNamespace(url=URL, locator=lambda _:SimpleNamespace(count=AsyncMock(return_value=0)), evaluate=AsyncMock(return_value={"allowed":False}),
             mouse=SimpleNamespace(click=AsyncMock()))
         with self.assertRaises(ValueError):
             await controls.safe_point_click(page, 50, 70)
@@ -46,12 +52,14 @@ class ControlTests(IsolatedAsyncioTestCase):
         selectors=[]
         def locate(selector):
             selectors.append(selector)
+            if selector == 'input[type="password"]':
+                return SimpleNamespace(count=AsyncMock(return_value=0))
             return locator
         page=SimpleNamespace(url=URL,locator=locate)
         result=await controls.safe_type_search(page,"Henrique")
         self.assertTrue(result["search_filled"])
         box.fill.assert_awaited_once_with("Henrique",timeout=6500)
-        self.assertIn('[role="searchbox"]', selectors[0])
+        self.assertIn('[role="searchbox"]', selectors[-1])
 
     async def test_capture_denied_outside_guild(self):
         page=SimpleNamespace(url="https://discord.com/channels/@me")
@@ -70,3 +78,4 @@ class ControlTests(IsolatedAsyncioTestCase):
         self.assertEqual(value["artifact_id"],123)
         uploaded=run.call_args.args[0][2]
         self.assertFalse(Path(uploaded).exists())
+

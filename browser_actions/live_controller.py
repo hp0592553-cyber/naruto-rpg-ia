@@ -127,6 +127,21 @@ def assert_rp_channel(url):
     if parsed.hostname not in ("discord.com", "www.discord.com") or not parsed.path.startswith("/channels/" + GUILD_ID + "/"):
         raise ValueError("Mouse and keyboard control only allowed inside Naruto Project RP")
 
+
+def assert_control_page(url):
+    """Browser controls are permitted on RP channels and public Google search."""
+    parsed = urlsplit(url)
+    if parsed.hostname in ("discord.com", "www.discord.com"):
+        return assert_rp_channel(url)
+    if (parsed.scheme == "https" and parsed.hostname in ("google.com", "www.google.com")
+            and parsed.path in ("/", "/search") and not parsed.username and not parsed.password):
+        return
+    raise ValueError("Controls restricted to Naruto RP and public Google search pages")
+
+async def assert_no_credential_form(page):
+    if await page.locator('input[type="password"]').count():
+        raise ValueError("Controls disabled while a credential form is present")
+
 def gh_get(path):
     proc = subprocess.run(
         ["gh", "api", "repos/" + REPO + "/contents/" + path],
@@ -181,10 +196,7 @@ def redacted_page_url(url):
 
 async def publish_private_screenshot(page, run_id):
     """Capture only the approved Naruto RP page; publish no image into commits."""
-    parsed = urlsplit(page.url)
-    guild_path = "/channels/" + GUILD_ID + "/"
-    if parsed.hostname not in ("discord.com", "www.discord.com") or not parsed.path.startswith(guild_path):
-        raise ValueError("Capture denied: open an authorized Naruto Project RP channel first")
+    assert_control_page(page.url)
     # Never include account login / password overlays in a screenshot.
     password_boxes = await page.locator('input[type="password"]').count()
     if password_boxes:
@@ -217,7 +229,8 @@ async def publish_private_screenshot(page, run_id):
 
 async def visible_ui_controls(page):
     """Expose coordinates of visible navigation affordances without exposing DOM/DMs."""
-    assert_rp_channel(page.url)
+    assert_control_page(page.url)
+    await assert_no_credential_form(page)
     return await page.evaluate("""() => {
       const selector = 'a,button,[role="link"],[role="button"]';
       return [...document.querySelectorAll(selector)]
@@ -234,7 +247,8 @@ async def visible_ui_controls(page):
     }""")
 
 async def safe_point_click(page, x, y):
-    assert_rp_channel(page.url)
+    assert_control_page(page.url)
+    await assert_no_credential_form(page)
     info = await page.evaluate("""([x,y]) => {
       const el = document.elementFromPoint(x,y);
       if (!el) return {allowed:false};
@@ -252,9 +266,10 @@ async def safe_point_click(page, x, y):
     return {"clicked": [x,y], "url": redacted_page_url(page.url)}
 
 async def safe_type_search(page, value):
-    assert_rp_channel(page.url)
+    assert_control_page(page.url)
+    await assert_no_credential_form(page)
     search = page.locator(
-        'input[type="search"], input[aria-label*="Search"], input[aria-label*="Buscar"], '
+        'textarea[name="q"], input[name="q"], input[type="search"], input[aria-label*="Search"], input[aria-label*="Buscar"], '
         'input[placeholder*="Search"], input[placeholder*="Buscar"], '
         '[role="searchbox"], [contenteditable="true"][aria-label*="Buscar"], '
         '[contenteditable="true"][aria-label*="Search"]')
@@ -487,7 +502,8 @@ async def perform(action, command):
             if action == "click":
                 return await safe_point_click(page, command["x"], command["y"])
             if action == "press":
-                assert_rp_channel(page.url)
+                assert_control_page(page.url)
+                await assert_no_credential_form(page)
                 if await page.locator(':focus').count():
                     focused = await page.evaluate("""() => {
                       const el = document.activeElement;
@@ -600,3 +616,4 @@ async def listen_commands():
         except Exception as exc:
             print("🍥 Bushin control transport temporarily unavailable:", type(exc).__name__, flush=True)
         await asyncio.sleep(8)
+

@@ -7,7 +7,7 @@ from unittest.mock import patch
 from playwright.async_api import async_playwright
 from browser_actions import live_controller as controls
 
-FIXTURE_URL = "https://discord.com/channels/1515877468299595919/1520114348079583263"
+FIXTURE_URL = "https://www.google.com/search?q=Bushin-test"
 HTML = """<!doctype html><html><body style="margin:30px">
 <h1>Bushin: isolated test page</h1>
 <button id="test" style="width:180px;height:60px" onclick="this.textContent='CLICK OK'">Test click</button>
@@ -53,3 +53,4 @@ async def main():
             await browser.close()
 if __name__ == "__main__":
     asyncio.run(main())
+

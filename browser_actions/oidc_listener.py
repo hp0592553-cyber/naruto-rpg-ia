@@ -83,7 +83,7 @@ async def listen_commands():
                 data = await perform(action, command)
                 if action == "status":
                     data["listener_capabilities"] = sorted(READ_ACTIONS)
-                    data["listener_revision"] = "2026-10-24-controls-1"
+                    data["listener_revision"] = "2026-10-24-controls-2"
                     data["typing_scope"] = "search_only"
                 if len(json.dumps(data, ensure_ascii=False)) > 11000:
                     data = {"truncated": True,
@@ -107,3 +107,4 @@ async def listen_commands():
             if errors >= 24:
                 raise RuntimeError("Cloudflare bridge not responding; ending runner")
             await asyncio.sleep(min(5 + errors, 20))
+
