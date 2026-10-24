@@ -390,6 +390,15 @@ def desktop_display_health():
     return detail
 
 
+
+def normalize_composer_text(value):
+    # Slate's empty editor uses invisible marker characters, not a user draft.
+    return str(value or "").replace("\ufeff", "").replace("\u200b", "").replace("\u2060", "").strip()
+
+def is_chat_composer(attrs):
+    label = str(attrs.get("label", "")).lower()
+    return bool(attrs.get("region")) or any(term in label for term in ("mensagem", "message", "conversar"))
+
 async def run_readonly_rpg_slash(page, text):
     """Perform a narrowly allowlisted slash interaction in the visible Discord UI.
 
@@ -413,13 +422,13 @@ async def run_readonly_rpg_slash(page, text):
             label: (el.getAttribute('aria-label') || '').toLowerCase(),
             region: !!el.closest('[role="main"], main, form')
         })""")
-        if attrs.get("region") or "mensagem" in attrs.get("label") or "message" in attrs.get("label"):
+        if is_chat_composer(attrs):
             editor = element
             break
     if editor is None:
         return {"executed": False, "stage": "composer_missing",
                 "note": "Discord chat input was not visibly found"}
-    existing = (await editor.inner_text()).strip()
+    existing = normalize_composer_text(await editor.inner_text())
     if existing:
         return {"executed": False, "stage": "existing_draft",
                 "note": "Refused to overwrite an existing user's draft"}
@@ -461,7 +470,7 @@ async def run_readonly_rpg_slash(page, text):
     before_texts = [x.get("text","") for x in state_before.get("messages",[])]
     recent = state_after.get("messages", [])
     change = [x for x in recent if x.get("text","") not in before_texts]
-    composer_after = (await editor.inner_text()).strip()[:120]
+    composer_after = normalize_composer_text(await editor.inner_text())[:120]
     return {
         "executed": bool(change) and not composer_after,
         "submitted_once": True,
