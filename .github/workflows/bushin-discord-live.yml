@@ -22,6 +22,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: "Configurar Node para capturas privadas"
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: "Instalar dependência de captura"
+        run: npm ci --prefix browser_actions/snapshot-deps --ignore-scripts --omit=dev
+
+      - name: "Testar controles antes de abrir desktop"
+        run: |
+          python -m unittest -v test_oidc_controls.py test_live_controls.py
+          node --check browser_actions/snapshot_upload.cjs
+
       - name: "Configurar Python"
         uses: actions/setup-python@v5
         with:

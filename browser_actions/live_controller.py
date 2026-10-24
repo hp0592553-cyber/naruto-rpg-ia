@@ -118,7 +118,7 @@ def validate_command(command, run_id):
             raise ValueError("Only non-submitting navigation keys are permitted")
     if action == "type_search":
         value = command.get("text")
-        if not isinstance(value, str) or not 0 < len(value) <= 100 or any(c in value for c in ("\\n", "\\r")):
+        if not isinstance(value, str) or not 0 < len(value) <= 100 or any(c in value for c in ("\n", "\r")):
             raise ValueError("Search text must be 1-100 characters with no newline")
     return action
 
@@ -255,7 +255,9 @@ async def safe_type_search(page, value):
     assert_rp_channel(page.url)
     search = page.locator(
         'input[type="search"], input[aria-label*="Search"], input[aria-label*="Buscar"], '
-        'input[placeholder*="Search"], input[placeholder*="Buscar"]')
+        'input[placeholder*="Search"], input[placeholder*="Buscar"], '
+        '[role="searchbox"], [contenteditable="true"][aria-label*="Buscar"], '
+        '[contenteditable="true"][aria-label*="Search"]')
     if await search.count() == 0:
         raise ValueError("No safe Discord search input found; chat composer is prohibited")
     box = search.first
