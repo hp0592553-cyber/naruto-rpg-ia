@@ -9,6 +9,7 @@ import {repoCall} from "./repo-suite.mjs";
 import {stateCall} from "./state-suite.mjs";
 import {discordCall} from "./discord-suite.mjs";
 import {personalCall} from "./personal-discord.mjs";
+import {apiMessageImage} from "./message-image.mjs";
 
 const RPG_GUILD = "1515877468299595919";
 function rpgValidatedChannel(value){
@@ -64,7 +65,7 @@ const specs=[
  ["browser_start","Iniciar navegador temporário",["confirmed"]],
  ["browser_status","Estado da sessão visual",[]],
  ["browser_open_url","Abrir canal autorizado",["url"]],
- ["browser_screenshot","Capturar tela autorizada",[]],
+ ["browser_screenshot","Gerar imagem das mensagens reais pela API, sem sessão visual do Discord",[]],
  ["browser_click","Clicar em elemento seguro",["x","y"]],
  ["browser_type","Digitar em busca ou preparar mensagem",["text"]],
  ["browser_scroll","Rolar página",["direction","amount"]],
@@ -155,6 +156,7 @@ const blocked=(name,reason)=>({state:"unavailable",tool:name,reason,implemented:
 export async function advancedCall(env,name,args={},ctx={}){
  if(!ADVANCED_NAMES.has(name))throw Error("Ferramenta Bushin desconhecida.");
  const simple=["bushin_save_state","bushin_load_state"].includes(name)?name:name.slice(7);
+ if(simple==="browser_screenshot")return apiMessageImage(env,ctx);
  if(simple==="rpg_send_message")return rpgSendVisual(env,args,ctx);
  if(simple==="rpg_message_result")return rpgMessageResult(env,args,ctx);
  if(simple.startsWith("browser_")||["ui_screenshot_gallery","ui_live_panel","session_reconnect"].includes(simple)){

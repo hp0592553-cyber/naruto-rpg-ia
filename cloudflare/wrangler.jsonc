@@ -3,6 +3,7 @@
   "main": "worker.mjs",
   "compatibility_date": "2026-10-19",
   "keep_vars": true,
+  "browser": {"binding": "BUSHIN_RENDERER"},
   "d1_databases": [{
     "binding": "DB",
     "database_name": "bushin-discord-auth",

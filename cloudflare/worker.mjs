@@ -404,6 +404,10 @@ async function mcp(req,env){
       if(name==="bushin_permissions_check")data={...data,mcp_catalog:catalogDiagnostics()};
       if(ADVANCED_NAMES.has(name)&&name!=="bushin_audit_log")
         await logToolAction(env,{me},name,data?.state||"completed").catch(()=>{});
+      if(data?.kind==="api_message_render"&&data.image?.mimeType==="image/png"){
+        const {image,...metadata}=data;
+        return rpc(id,{content:[{type:"text",text:JSON.stringify(metadata)},{type:"image",mimeType:image.mimeType,data:image.data}],structuredContent:metadata});
+      }
       return rpc(id,{content:[{type:"text",text:JSON.stringify(data)}],structuredContent:data});
     }catch(e){
       if(ADVANCED_NAMES.has(name)&&me?.id)await logToolAction(env,{me},name,"failed").catch(()=>{});
