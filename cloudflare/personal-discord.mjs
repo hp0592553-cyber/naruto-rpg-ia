@@ -126,9 +126,12 @@ export async function personalCall(env,name,args={},ctx={}){
  const mid=result.data?.id;
  if(!id(mid)||String(result.data?.author?.id||"")!==ctx.me.id)
    return {state:"unknown",sent:null,reason:"Discord não confirmou autor e ID; não repetir automaticamente."};
- await env.DB.prepare("INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at")
+ let tracking_saved=true;
+ try{await env.DB.prepare("INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at")
    .bind(ctx.me.id,key,JSON.stringify({at:stamp,id:mid}),stamp).run();
- return {state:"completed",sent:true,message_id:mid,channel_id:args.channel_id,author_id:ctx.me.id};
+ }catch{tracking_saved=false;}
+ return {state:"completed",sent:true,message_id:mid,channel_id:args.channel_id,author_id:ctx.me.id,tracking_saved,
+   ...(!tracking_saved?{note:"Entrega confirmada pelo Discord; registro local falhou. Não repetir a mensagem."}:{})};
 }
 
 /** Read-only guild channel metadata; each message read still checks access. */
