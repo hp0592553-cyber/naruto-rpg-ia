@@ -153,6 +153,32 @@ def make_app(secret):
     app.router.add_route("*", "/{tail:.*}", handler)
     return app
 
+def focus_chromium_window(env):
+    """Ensure the headed Chromium is mapped into the same Xvfb desktop as x11vnc."""
+    try:
+        found = subprocess.run(
+            ["xdotool", "search", "--class", "(Chromium|chromium|Chrome|chrome)"],
+            env=env, capture_output=True, text=True, timeout=8)
+        windows = [n for n in found.stdout.splitlines() if n.strip().isdigit()]
+        if not windows:
+            print("Bushin display: Chromium window not mapped yet.", flush=True)
+            return
+        window = windows[-1].strip()
+        for cmd in (
+            ["xdotool", "windowmap", window],
+            ["xdotool", "windowmove", window, "0", "0"],
+            ["xdotool", "windowactivate", "--sync", window],
+        ):
+            result = subprocess.run(cmd, env=env, capture_output=True, timeout=8)
+            if result.returncode != 0:
+                print("Bushin display: window focus step failed, retry on next start.", flush=True)
+                break
+        else:
+            print("Bushin display: Chromium window brought to front on Xvfb.", flush=True)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print("Bushin display: window focus unavailable: " + type(exc).__name__, flush=True)
+
+
 def process(*args, env=None):
     return subprocess.Popen(
         list(args), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -176,10 +202,13 @@ async def start():
             raise RuntimeError("Arquivos noVNC nao encontrados")
         processes.append(process("Xvfb", DISPLAY, "-screen", "0", "1365x768x24", "-nolisten", "tcp", env=env))
         await asyncio.sleep(2)
+        # A colored root background makes it clear when noVNC connected but Chrome is hidden.
+        subprocess.run(["xsetroot", "-display", DISPLAY, "-solid", "#23324c"],
+                       env=env, capture_output=True, timeout=8, check=True)
         processes.append(process("openbox", env=env))
         processes.append(process(
             "x11vnc", "-display", DISPLAY, "-localhost", "-forever",
-            "-shared", "-nopw", "-rfbport", "5900", "-quiet", env=env))
+            "-noxdamage", "-shared", "-nopw", "-rfbport", "5900", "-quiet", env=env))
         processes.append(process(
             "websockify", "--web", VNC_DIR, "127.0.0.1:6081", "127.0.0.1:5900", env=env))
 
@@ -190,6 +219,8 @@ async def start():
         await pw.stop()
         chromium_args = (
             chromium_bin, "--no-sandbox", "--disable-dev-shm-usage",
+            "--disable-gpu", "--disable-gpu-compositing", "--window-position=0,0",
+            "--start-maximized",
             "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222",
             "--no-first-run", "--disable-default-apps", "--disable-features=MediaRouter",
             "--user-data-dir=" + str(browser_profile), "--window-size=1300,720",
@@ -197,6 +228,7 @@ async def start():
         chromium_position = len(processes)
         processes.append(process(*chromium_args, env=env))
         await asyncio.sleep(4)
+        focus_chromium_window(env)
         if any(p.poll() is not None for p in processes):
             raise RuntimeError("Um processo do desktop terminou antes de iniciar")
 
@@ -283,6 +315,8 @@ async def start():
                             old_browser.kill()
                     await asyncio.sleep(3)
                     processes[chromium_position] = process(*chromium_args, env=env)
+                    await asyncio.sleep(3)
+                    focus_chromium_window(env)
                     browser_restarts += 1
                     browser_disconnects = 0
             minutes = int((time.monotonic() - started) / 60)
