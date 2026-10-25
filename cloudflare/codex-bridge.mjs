@@ -14,15 +14,32 @@ async function addChatHistory(env,owner,message){
  const current=await readRecord(env,owner,KEY_CHAT);
  await writeRecord(env,owner,KEY_CHAT,safeHistory([...(current?.data?.messages||[]),message]).length?{messages:safeHistory([...(current?.data?.messages||[]),message])}:{messages:[]});
 }
-function buildChatPrompt({intent,question,context,history,snapshot}){
+function scannedNotesFromStore(stored,scope,selected,current){
+ const notes=stored?.notes&&typeof stored.notes==="object"?stored.notes:{};
+ let ids=Object.keys(notes).filter(x=>/^\d{15,22}$/.test(x));
+ ids.sort((a,b)=>Number(notes[b]?.updated_at||0)-Number(notes[a]?.updated_at||0));
+ if(scope==="none")ids=[];
+ else if(scope==="selected")ids=ids.filter(id=>selected.includes(id));
+ else if(scope==="current")ids=ids.filter(id=>id===current);
+ const max=scope==="selected"?8:8;
+ return ids.slice(0,max).map(id=>({channel_id:id,
+  age_minutes:Math.max(0,Math.round((Date.now()-Number(notes[id]?.updated_at||0))/60000)),
+  summary:safeText(notes[id]?.summary,420),
+  evidence:"Resumo de até 8 mensagens recentes por canal; não é histórico completo, pode abranger outros canais do mesmo lote."
+ })).filter(x=>x.summary);
+}
+function buildChatPrompt({intent,question,context,history,snapshot,scanned}){
  const purpose={conversar:"Responder à conversa sobre o RPG",analisar:"Analisar informações, distinguir evidências de suposições",
   ficha:"Conferir ficha, nível, XP, vida, chakra e itens somente quando comprovados",
   missoes:"Entender missão e indicar próximos passos sem inventar progresso",
   combate:"Orientar sobre turnos, riscos, defesa, vida e chakra sem agir",
   regras:"Explicar regras somente com base no conteúdo fornecido, indicando dúvidas",
   proxima:"Indicar uma única próxima ação prudente para o Henrique, não executá-la"}[intent];
- const data={intencao:purpose,pergunta:question,historico:history.slice(-6).map(({role,text})=>({role,text:safeText(text,850)})),
-  contexto_do_canal:context||"Nenhuma mensagem de canal fornecida.",
+ const data={intencao:purpose,pergunta:question,
+  historico:history.slice(-4).map(({role,text})=>({role,text:safeText(text,420)})),
+  contexto_do_canal_aberto:context||"Nenhuma mensagem do canal aberto foi anexada.",
+  canais_analisados_previamente:scanned,
+  aviso_canais:"Os resumos podem misturar informações de até 3 canais do mesmo lote e são provenientes de poucas mensagens. Não atribua regras ou ficha a canal ou pessoa específica sem evidência.",
   ficha_confirmada:snapshot||"Ficha ainda não confirmada."};
  return "BUSHIN_CODEX_CHAT_V1\nVocê é o Codex no chat privado do Bushin para auxiliar Henrique no Naruto Project. "+
  "Responda em português brasileiro, informal e claro, até 1600 caracteres. "+
@@ -82,11 +99,13 @@ export async function codexBridgeMobile(req,env,ctx,{reply,baseUrl}){
  const owner=ownerOf(env);
  if(!owner||String(ctx.me?.id||"")!==owner)return denied(reply,403);
  if(req.method==="GET"){
-  const [a,j,p,ch]=await Promise.all([readRecord(env,owner,KEY_AGENT),readRecord(env,owner,KEY_JOB),readRecord(env,owner,KEY_PAIR),readRecord(env,owner,KEY_CHAT)]);
+  const [a,j,p,ch,sc]=await Promise.all([readRecord(env,owner,KEY_AGENT),readRecord(env,owner,KEY_JOB),readRecord(env,owner,KEY_PAIR),readRecord(env,owner,KEY_CHAT),readRecord(env,owner,"discord2_rpg_scan")]);
   const online=!!(a&&Date.now()-Number(a.data.last_seen||0)<HEARTBEAT_MS);
   const job=j?.data||null;
   return reply({connected:online,paired:!!a,chat_ready:online&&a?.data.chat_capable===true,last_seen:a?.data.last_seen||null,
    chat_history:safeHistory(ch?.data?.messages||[]),
+   scan_available_channels:Object.keys(sc?.data?.notes||{}).filter(id=>/^\d{15,22}$/.test(id)).slice(0,100),
+   scan_last_at:Number(sc?.data?.recent||0),
    pairing_pending:!!(p&&p.data.expires>Date.now()),
    job:job?{id:job.id,state:job.state,updated_at:job.updated_at,
     result:job.state==="completed"?String(job.result||"").slice(0,2600):null,
@@ -117,7 +136,12 @@ export async function codexBridgeMobile(req,env,ctx,{reply,baseUrl}){
    return reply({error:"Codex chat ainda indisponível. Atualize o script da ponte no Codespaces e deixe-o executando."},409,RESPONSE_HEADERS);
   const intent=String(parsed.body?.intent||"conversar");
   const question=safeText(parsed.body?.question,700);
-  const context=safeText(parsed.body?.context,2400);
+  const context=safeText(parsed.body?.context,1100);
+  const scope=String(parsed.body?.scan_scope||"scanned");
+  const selected=Array.isArray(parsed.body?.scan_channel_ids)?parsed.body.scan_channel_ids.filter(x=>typeof x==="string"&&/^\d{15,22}$/.test(x)).slice(0,50):[];
+  const current=typeof parsed.body?.current_channel_id==="string"&&/^\d{15,22}$/.test(parsed.body.current_channel_id)?parsed.body.current_channel_id:"";
+  if(!["scanned","selected","current","none"].includes(scope))
+   return reply({error:"Escopo dos canais inválido."},400,RESPONSE_HEADERS);
   if(!CHAT_INTENTS.includes(intent)||!question||question.length>700)
    return reply({error:"Escolha uma intenção válida e escreva sua pergunta (até 700 caracteres)."},400,RESPONSE_HEADERS);
   const previous=await readRecord(env,owner,KEY_JOB);
@@ -125,15 +149,20 @@ export async function codexBridgeMobile(req,env,ctx,{reply,baseUrl}){
    return reply({error:"O Codex está respondendo outra mensagem. Aguarde a resposta.",job_id:previous.data.id},409,RESPONSE_HEADERS);
   const chatRow=await readRecord(env,owner,KEY_CHAT);
   const snapshotRow=await readRecord(env,owner,"discord2_character_v1");
+  const scanRow=await readRecord(env,owner,"discord2_rpg_scan");
+  const scanned=scannedNotesFromStore(scanRow?.data,scope,selected,current);
   const snapshot=snapshotRow?.data?.owner_id===owner?{
    stats:snapshotRow.data.stats||null,mission:snapshotRow.data.mission||null,
    evidence:snapshotRow.data.evidence||null,updated_at:snapshotRow.data.updated_at||null
   }:null;
   const id=crypto.randomUUID(),at=Date.now();
-  const prompt=buildChatPrompt({intent,question,context,history:safeHistory(chatRow?.data?.messages||[]),snapshot});
+  const prompt=buildChatPrompt({intent,question,context,history:safeHistory(chatRow?.data?.messages||[]),snapshot,scanned});
+  // The Codespaces runner rejects chat prompts longer than 10,500 characters.
+  if(prompt.length>9500)return reply({error:"Contexto muito longo. Escolha menos canais."},413,RESPONSE_HEADERS);
   await writeRecord(env,owner,KEY_JOB,{id,state:"queued",kind:"chat",prompt,created_at:at,updated_at:at});
   await addChatHistory(env,owner,{id,role:"user",text:question,intent,at});
-  return reply({queued:true,job_id:id,kind:"chat",note:"Pedido entregue somente ao Codex privado, não ao Discord."},202,RESPONSE_HEADERS);
+  return reply({queued:true,job_id:id,kind:"chat",included_scan_notes:scanned.length,
+   note:"Pedido entregue somente ao Codex privado, não ao Discord. Resumos de canais são parciais."},202,RESPONSE_HEADERS);
  }
  if(action==="test"){
   const a=await readRecord(env,owner,KEY_AGENT);
