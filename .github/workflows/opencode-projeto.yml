@@ -1,4 +1,5 @@
 name: Naruto RPG - OpenCode (Projeto)
+run-name: ${{ inputs.mode == 'comando' && format('Discord 2 {0}', inputs.request_id) || 'Naruto RPG - OpenCode' }}
 
 on:
   workflow_dispatch:
@@ -8,7 +9,17 @@ on:
         required: true
         default: diagnostico
         type: choice
-        options: [diagnostico, jogar]
+        options: [diagnostico, jogar, comando]
+      request_id:
+        description: "Identificador do pedido no painel"
+        required: false
+        type: string
+        default: ""
+      command_json:
+        description: "Comando escolhido no painel, canal e opções"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -18,8 +29,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  comando:
+    if: github.ref == 'refs/heads/Projeto' && inputs.mode == 'comando'
+    name: Executar comando escolhido no Discord 2
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: Projeto
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Instalar cliente existente
+        run: python -m pip install --disable-pip-version-check 'mcp==1.30.0' 'discord.py-self==2.1.0'
+      - name: Executar uma vez e exigir resposta correlacionada
+        env:
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+          RPG_COMMAND_JSON: ${{ inputs.command_json }}
+          RPG_MODE: jogar
+          RPG_ACTION_MARKER: ${{ runner.temp }}/discord2-command-reserved
+        run: python scripts/naruto_panel_command.py
   jogar:
-    if: github.ref == 'refs/heads/Projeto'
+    if: github.ref == 'refs/heads/Projeto' && inputs.mode != 'comando'
     name: Verificar MCP e acesso autorizado ao Naruto Project
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -142,3 +175,4 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: ${{ runner.temp }}/naruto-evidence/
+
