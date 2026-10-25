@@ -128,3 +128,18 @@ atrasadas. Falhas não são substituídas por exemplos de guias. Cache válido d
 até 60 segundos; o botão atualizar invalida o cache. Consultas simultâneas do
 mesmo canal são agrupadas. O catálogo é do registro da guild, não uma garantia de
 permissão para executar cada comando no canal. 35 testes locais passaram.
+
+## Enviar /perfil ver pela rota experimental existente
+
+Uma leitura real encontrou a resposta 1563891987076358225 do Naruto Bot, às
+12:28:25 UTC, interaction.id=1563891980252086352, command=perfil ver e
+user_id=481485837801095178. O texto identifica Henrique Uchiha, 13 anos, Masculino,
+3365 Ryō. Não há evidência nesta leitura de qual cliente iniciou essa interação.
+
+O botão Enviar passou a chamar a rota existente /ai/profile-probe somente para
+/perfil ver sem parâmetros no canal 1520114348079583263. Outros slash commands
+continuam sem executor no botão. O transporte é pessoal e não oficial, não um
+novo privilégio OAuth. A interface exige submitted=true e não converte HTTP
+aceito em execução/resposta confirmada. Não faz repetição após resultado incerto.
+42 testes locais passaram, com rede e banco simulados. Nenhuma nova interação
+foi enviada por esta alteração; o acionamento depende do clique do usuário.
