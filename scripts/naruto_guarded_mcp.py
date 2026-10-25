@@ -81,6 +81,8 @@ async def status():
         return {**state, 'status': 'discord_not_ready'}
     if getattr(client.user, 'bot', False):
         return {**state, 'status': 'wrong_identity_bot'}
+    if client.user.id != 481485837801095178:
+        return {**state, 'status': 'wrong_account'}
     guild = client.get_guild(GUILD_ID)
     if guild is None:
         return {**state, 'status': 'guild_not_accessible', 'account_id': str(client.user.id)}
@@ -117,34 +119,50 @@ async def list_tools():
             for name, description in descriptions.items()]
 
 
-async def discover():
+async def discover(command_path="missoes minhas"):
+    parts = command_path.lstrip("/").split()
     global commands
     commands = [cmd for cmd in await collect(channel.application_commands())
                 if isinstance(cmd, discord.SlashCommand) and cmd.application_id == NARUTO_BOT_ID]
-    roots = [c for c in commands if c.name == 'missoes']
+    roots = [c for c in commands if c.name == parts[0]]
     scoped = [c for c in roots if getattr(c, 'guild_id', None) == GUILD_ID]
     roots = scoped or roots
     if len(roots) != 1:
         return None
-    return next((c for c in roots[0].children if c.name == 'minhas'), None)
+    target = roots[0]
+    for part in parts[1:]:
+        target = next((c for c in getattr(target, 'children', []) if c.name == part), None)
+        if target is None:
+            return None
+    if getattr(target, 'children', []):
+        return None
+    return target
 
 
-async def consult():
+
+async def consult(command_path="missoes minhas", options=None):
+    options = options or {}
     if state['command_attempted']:
         return {**state, 'status': 'blocked_already_attempted'}
-    command = await discover()
+    command = await discover(command_path)
     if command is None:
         return {**state, 'status': 'command_not_found'}
+    known = {o.name: o for o in getattr(command, 'options', [])}
+    if set(options) - set(known):
+        return {**state, 'status': 'unknown_options'}
+    missing = [name for name, opt in known.items() if getattr(opt, 'required', False) and name not in options]
+    if missing:
+        return {**state, 'status': 'missing_options', 'missing': missing}
     if os.getenv('RPG_MODE') != 'jogar':
         return {**state, 'status': 'blocked_read_only'}
     marker = Path(os.environ['RPG_ACTION_MARKER'])
     try:
         with marker.open('x') as handle:
-            handle.write('reserved /missoes minhas\n')
+            handle.write('reserved /' + command_path.lstrip('/') + '\n')
     except FileExistsError:
         return {**state, 'status': 'blocked_run_already_attempted'}
     state['command_attempted'] = True
-    audit('command_attempt', 'reserved', command='missoes minhas')
+    audit('command_attempt', 'reserved', command=command_path)
     # O listener existe antes do envio. Mensagem anterior ou de outro usuario nao conta.
     received = asyncio.Queue()
     baseline = discord.utils.time_snowflake(datetime.now(timezone.utc))
@@ -153,7 +171,7 @@ async def consult():
             await received.put(message)
     client.receiver = on_message
     try:
-        interaction = await asyncio.wait_for(command(channel), timeout=45)
+        interaction = await asyncio.wait_for(command(channel, **options), timeout=45)
         interaction_id = getattr(interaction, 'id', None)
         state.update(command_sent=True, interaction_id=str(interaction_id) if interaction_id else None)
         audit('command_send', 'submitted', evidence=dict(state))
@@ -213,3 +231,4 @@ async def run():
 
 if __name__ == '__main__':
     asyncio.run(run())
+
