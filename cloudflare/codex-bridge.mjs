@@ -1,0 +1,139 @@
+// Safe Codex CLI bridge: outbound-only Codespaces polling and one fixed echo test.
+// Never exposes ChatGPT credentials to browser/Worker, and never executes Discord actions.
+const NS="discord2_codex_bridge_v1:";
+const LIMIT=10000,PAIR_MS=10*60*1000,HEARTBEAT_MS=60000,JOB_MS=3*60*1000;
+const RESPONSE_HEADERS={"cache-control":"no-store","x-content-type-options":"nosniff","referrer-policy":"no-referrer"};
+const KEY_PAIR=NS+"pair",KEY_AGENT=NS+"agent",KEY_JOB=NS+"job";
+const ECHO="BUSHIN_CODEX_OK";
+
+async function digest(value){
+ const bytes=new TextEncoder().encode(value);
+ return [...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+const randomSecret=()=>crypto.randomUUID().replaceAll("-","")+crypto.randomUUID().replaceAll("-","");
+async function readRecord(env,owner,key){
+ const row=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(owner,key).first();
+ if(!row)return null;
+ try{return {raw:row.value_json,data:JSON.parse(row.value_json)}}catch{return null}
+}
+async function writeRecord(env,owner,key,data){
+ const t=Date.now();
+ await env.DB.prepare("INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at").bind(owner,key,JSON.stringify(data),t).run();
+}
+async function deleteRecord(env,owner,key){
+ await env.DB.prepare("DELETE FROM bushin_project_state WHERE owner_id=? AND key=?").bind(owner,key).run();
+}
+async function compareExchange(env,owner,key,oldValue,next){
+ const result=await env.DB.prepare("UPDATE bushin_project_state SET value_json=?,updated_at=? WHERE owner_id=? AND key=? AND value_json=?").bind(JSON.stringify(next),Date.now(),owner,key,oldValue).run();
+ return Number(result?.meta?.changes||0)===1;
+}
+async function parseJson(req){
+ if(!String(req.headers.get("content-type")||"").startsWith("application/json"))return {error:"Envie JSON.",status:415};
+ const text=await req.text();
+ if(text.length>LIMIT)return {error:"Corpo muito grande.",status:413};
+ try{return {body:JSON.parse(text)}}catch{return {error:"JSON inválido.",status:400}}
+}
+const ownerOf=env=>String(env.BUSHIN_OWNER_DISCORD_ID||"");
+const denied=(reply,status=401)=>reply({error:"Acesso negado ao executor Codex."},status,RESPONSE_HEADERS);
+async function verifyAgent(req,env,owner){
+ const auth=req.headers.get("authorization")||"";
+ if(!/^Bearer [A-Za-z0-9_-]{64}$/.test(auth))return null;
+ const token=auth.slice(7),row=await readRecord(env,owner,KEY_AGENT);
+ if(!row||row.data.hash!==await digest(token))return null;
+ return row;
+}
+async function heartbeat(env,owner,agent){
+ const next={...agent.data,last_seen:Date.now()};
+ return await compareExchange(env,owner,KEY_AGENT,agent.raw,next);
+}
+
+// Called only AFTER the pre-existing Bushin mobile owner session was verified.
+export async function codexBridgeMobile(req,env,ctx,{reply,baseUrl}){
+ const owner=ownerOf(env);
+ if(!owner||String(ctx.me?.id||"")!==owner)return denied(reply,403);
+ if(req.method==="GET"){
+  const [a,j,p]=await Promise.all([readRecord(env,owner,KEY_AGENT),readRecord(env,owner,KEY_JOB),readRecord(env,owner,KEY_PAIR)]);
+  const online=!!(a&&Date.now()-Number(a.data.last_seen||0)<HEARTBEAT_MS);
+  const job=j?.data||null;
+  return reply({connected:online,paired:!!a,last_seen:a?.data.last_seen||null,
+   pairing_pending:!!(p&&p.data.expires>Date.now()),
+   job:job?{id:job.id,state:job.state,updated_at:job.updated_at,
+    result:job.state==="completed"?String(job.result||"").slice(0,300):null,
+    error:job.state==="failed"?String(job.error||"Teste não concluído").slice(0,250):null}:null},200,RESPONSE_HEADERS);
+ }
+ if(req.method!=="POST")return reply({error:"Método não permitido."},405,RESPONSE_HEADERS);
+ if(req.headers.get("origin")!==baseUrl)return reply({error:"Origem não autorizada."},403,RESPONSE_HEADERS);
+ const parsed=await parseJson(req);
+ if(parsed.error)return reply({error:parsed.error},parsed.status,RESPONSE_HEADERS);
+ const action=String(parsed.body?.action||"");
+ if(action==="pair"){
+  const code=randomSecret();
+  await writeRecord(env,owner,KEY_PAIR,{hash:await digest(code),expires:Date.now()+PAIR_MS});
+  return reply({pair_code:code,expires_in_seconds:600,note:"Cole o código só no terminal do Codespaces. Não compartilhe no chat."},200,RESPONSE_HEADERS);
+ }
+ if(action==="disconnect"){
+  await Promise.all([KEY_PAIR,KEY_AGENT,KEY_JOB].map(key=>deleteRecord(env,owner,key)));
+  return reply({connected:false,paired:false},200,RESPONSE_HEADERS);
+ }
+ if(action==="test"){
+  const a=await readRecord(env,owner,KEY_AGENT);
+  if(!a||Date.now()-Number(a.data.last_seen||0)>HEARTBEAT_MS)
+   return reply({error:"Executor Codex não está online. Inicie o script no Codespaces."},409,RESPONSE_HEADERS);
+  const j=await readRecord(env,owner,KEY_JOB);
+  if(j&&["queued","running"].includes(j.data.state)&&Date.now()-Number(j.data.created_at||0)<JOB_MS)
+   return reply({error:"Já existe um teste em andamento.",job_id:j.data.id},409,RESPONSE_HEADERS);
+  const id=crypto.randomUUID();
+  await writeRecord(env,owner,KEY_JOB,{id,state:"queued",kind:"echo",created_at:Date.now(),updated_at:Date.now()});
+  return reply({queued:true,job_id:id,note:"Teste de resposta do Codex, sem Discord e sem ações de jogo."},202,RESPONSE_HEADERS);
+ }
+ return reply({error:"Ação desconhecida."},400,RESPONSE_HEADERS);
+}
+
+// Agent endpoints use only a 256-bit bridge token (not ChatGPT OAuth credentials).
+export async function codexBridgeAgent(req,env,{reply}){
+ const owner=ownerOf(env);
+ if(!owner)return denied(reply,503);
+ const pathname=new URL(req.url).pathname;
+ if(pathname==="/internal/codex-bridge/pair"){
+  if(req.method!=="POST")return denied(reply,405);
+  const parsed=await parseJson(req);
+  if(parsed.error)return reply({error:parsed.error},parsed.status,RESPONSE_HEADERS);
+  const code=String(parsed.body?.pair_code||"");
+  if(!/^[a-f0-9]{64}$/.test(code))return denied(reply);
+  const pair=await readRecord(env,owner,KEY_PAIR);
+  if(!pair||Number(pair.data.expires)<Date.now()||pair.data.hash!==await digest(code))return denied(reply);
+  // Consume exactly once, even if two requests race.
+  const deleted=await env.DB.prepare("DELETE FROM bushin_project_state WHERE owner_id=? AND key=? AND value_json=?").bind(owner,KEY_PAIR,pair.raw).run();
+  if(Number(deleted?.meta?.changes||0)!==1)return denied(reply,409);
+  const token=randomSecret();
+  await writeRecord(env,owner,KEY_AGENT,{hash:await digest(token),created_at:Date.now(),last_seen:Date.now()});
+  await deleteRecord(env,owner,KEY_JOB);
+  return reply({paired:true,agent_token:token},200,RESPONSE_HEADERS);
+ }
+ const agent=await verifyAgent(req,env,owner);
+ if(!agent)return denied(reply);
+ if(pathname==="/internal/codex-bridge/queue"&&req.method==="GET"){
+  if(!await heartbeat(env,owner,agent))return denied(reply);
+  const row=await readRecord(env,owner,KEY_JOB);
+  if(!row)return reply({job:null},200,RESPONSE_HEADERS);
+  const job=row.data;
+  if(job.state!=="queued"||job.kind!=="echo"||Date.now()-Number(job.created_at)>JOB_MS)return reply({job:null},200,RESPONSE_HEADERS);
+  const next={...job,state:"running",updated_at:Date.now()};
+  if(!await compareExchange(env,owner,KEY_JOB,row.raw,next))return reply({job:null},200,RESPONSE_HEADERS);
+  return reply({job:{id:job.id,kind:"echo",prompt:"Responda apenas: "+ECHO}},200,RESPONSE_HEADERS);
+ }
+ if(pathname==="/internal/codex-bridge/result"&&req.method==="POST"){
+  const parsed=await parseJson(req);
+  if(parsed.error)return reply({error:parsed.error},parsed.status,RESPONSE_HEADERS);
+  const data=parsed.body||{},id=String(data.id||"");
+  if(!/^[0-9a-f-]{36}$/i.test(id))return reply({error:"ID inválido."},400,RESPONSE_HEADERS);
+  const job=await readRecord(env,owner,KEY_JOB);
+  if(!job||job.data.id!==id||job.data.state!=="running")return reply({error:"Teste não encontrado ou já concluído."},409,RESPONSE_HEADERS);
+  const success=data.success===true&&String(data.output||"").trim()===ECHO;
+  const next={...job.data,state:success?"completed":"failed",updated_at:Date.now(),
+   result:success?ECHO:"",error:success?"":String(data.error||"O Codex não devolveu a confirmação esperada.").slice(0,250)};
+  if(!await compareExchange(env,owner,KEY_JOB,job.raw,next))return reply({error:"Resultado já recebido."},409,RESPONSE_HEADERS);
+  return reply({saved:true,success},200,RESPONSE_HEADERS);
+ }
+ return reply({error:"Rota indisponível."},404,RESPONSE_HEADERS);
+}
