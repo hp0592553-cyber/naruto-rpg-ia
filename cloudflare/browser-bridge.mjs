@@ -6,7 +6,7 @@
  * The Linux listener validates destinations/actions independently.
  * No personal-message sending, DMs, terminal, passwords, or arbitrary URLs.
  */
-const REPO = "educacaomggovbr00-web/shinobi-ai-agent";
+const REPO = "hp0592553-cyber/naruto-rpg-ia";
 const GUILD = "1515877468299595919";
 const BASE = "https://api.github.com/repos/" + REPO;
 const GITHUB_HEADERS = token => ({
@@ -16,7 +16,7 @@ const GITHUB_HEADERS = token => ({
   "user-agent": "Bushin-Browser-Cloudflare"
 });
 
-const D1_READ_ACTIONS=new Set(["status","read_page_text","rpg_view","rpg_scout","open_url","inspect_ui","scroll","screenshot"]);
+const D1_READ_ACTIONS=new Set(["tabs","status","read_page_text","rpg_view","rpg_scout","open_url","inspect_ui","scroll","screenshot","rpg_slash","click","press","type_search"]);
 async function d1VisualSession(env){
   if(!env.DB?.prepare)return null;
   const now=Date.now();
@@ -40,7 +40,7 @@ async function d1ReadCommand(env,args){
     .bind(session.run_id,env.BUSHIN_OWNER_DISCORD_ID).first();
   if(Number(busy?.n||0)>=3)return {state:"unavailable",reason:"Fila visual cheia. Nao foi solicitada nova leitura."};
   const rand=new Uint8Array(16);crypto.getRandomValues(rand);
-  const id="visual_"+Array.from(rand,x=>x.toString(16).padStart(2,"0")).join("");
+  const id="bushin-"+crypto.randomUUID();
   const stored=await env.DB.prepare("INSERT INTO bushin_visual_commands(id,run_id,owner_id,action,args_json,state,created_at,updated_at) SELECT ?,run_id,owner_id,?,?,'queued',?,? FROM bushin_visual_sessions WHERE run_id=? AND owner_id=? AND expires_at>? AND last_seen>?")
     .bind(id,request.action,JSON.stringify(request),now,now,session.run_id,env.BUSHIN_OWNER_DISCORD_ID,now,now-60000).run();
   if(Number(stored.meta?.changes||0)!==1)return {state:"unavailable",reason:"Sessao visual expirou antes de enfileirar."};
@@ -48,7 +48,7 @@ async function d1ReadCommand(env,args){
 }
 async function d1ReadResult(env,args){
   if(!env.DB?.prepare)return {state:"unavailable",reason:"Banco D1 indisponivel."};
-  if(!/^visual_[a-f0-9]{32}$/.test(args.command_id||"")||! /^[0-9]{8,20}$/.test(args.session_id||""))throw Error("Identificador invalido.");
+  if(!/^(?:visual_[a-f0-9]{32}|bushin-[a-f0-9-]{36})$/.test(args.command_id||"")||! /^[0-9]{8,20}$/.test(args.session_id||""))throw Error("Identificador invalido.");
   const row=await env.DB.prepare("SELECT action,state,result_json,updated_at FROM bushin_visual_commands WHERE id=? AND run_id=? AND owner_id=?")
     .bind(args.command_id,args.session_id,env.BUSHIN_OWNER_DISCORD_ID).first();
   if(!row)return {state:"not_found",command_id:args.command_id};
@@ -97,6 +97,7 @@ function validate(action, args) {
   const c={action};
   if (["status","read_page_text","rpg_view","inspect_ui","screenshot"].includes(action)) return c;
   if (action==="tabs") {
+    if(args.path==="new")c.path="new";
     if (args.tab_index!==undefined && (!Number.isInteger(args.tab_index)||args.tab_index<0||args.tab_index>20))
       throw Error("Índice da aba inválido.");
     if (args.tab_index!==undefined)c.tab_index=args.tab_index;
@@ -107,6 +108,8 @@ function validate(action, args) {
     if(typeof args.text!=="string"||!args.text.trim()||args.text.length>500||/[\r\n]/.test(args.text)||/@(?:everyone|here)\b/i.test(args.text))
       throw Error("Mensagem de rascunho inválida.");
     c.text=args.text;
+    if (["/perfil ver","/missoes minhas","/missoes ativas"].includes(c.text))
+      return {action:"rpg_slash",url:c.channel_url,command:c.text};
     return c;
   }
   if (action==="capture_gallery") {
@@ -157,7 +160,7 @@ export const BROWSER_TOOLS = [
   inputSchema:{type:"object",properties:{},additionalProperties:false},
   annotations:{readOnlyHint:true,destructiveHint:false}},
  {name:"bushin_browser_action",title:"Navegar no Discord com Bushin",
-  description:"Comanda leitura, navegação, abas, capturas e preparação de rascunhos na sessão autorizada do Naruto RP. Nunca envia mensagens por esta ferramenta; confirme o resultado com bushin_browser_result.",
+  description:"Comanda leitura e navegação no Naruto RP. compose_message com /perfil ver, /missoes minhas ou /missoes ativas executa um comando real de consulta pelo Chromium, com verificação do resultado; outros rascunhos não são enviados.",
   inputSchema:{type:"object",properties:{
    action:{type:"string",enum:["status","read_page_text","rpg_view","rpg_scout","inspect_ui","open_url","scroll","click","press","type_search","screenshot","tabs","capture_gallery","compose_message"]},
    url:{type:"string"},urls:{type:"array",items:{type:"string"},minItems:1,maxItems:4},
@@ -177,8 +180,8 @@ export const BROWSER_TOOLS = [
 ];
 export async function browserCall(env,name,args={}) {
   if(name==="bushin_browser_status")return d1VisualStatus(env);
-  if(name==="bushin_browser_result"&&/^visual_[a-f0-9]{32}$/.test(args.command_id||""))return d1ReadResult(env,args);
-  if(name==="bushin_browser_action"&&D1_READ_ACTIONS.has(args.action))return d1ReadCommand(env,args);
+  if(name==="bushin_browser_result"&&/^(?:visual_[a-f0-9]{32}|bushin-[a-f0-9-]{36})$/.test(args.command_id||""))return d1ReadResult(env,args);
+  if(name==="bushin_browser_action"&&(D1_READ_ACTIONS.has(args.action)||(args.action==="compose_message"&&["/perfil ver","/missoes minhas","/missoes ativas"].includes(args.text))))return d1ReadCommand(env,args);
   if (!initialized(env)) return {configured:false,connected:false,
     reason:"BUSHIN_GITHUB_TOKEN ainda não foi configurado na área Secrets do Worker Cloudflare. Nenhum token deve ser enviado ao chat."};
   if(name==="bushin_browser_status") {

@@ -169,7 +169,7 @@ export async function advancedCall(env,name,args={},ctx={}){
      if(args.channel_url)return browserCall(env,"bushin_browser_action",{action:"compose_message",channel_url:args.channel_url,text:args.text});
      return browserCall(env,"bushin_browser_action",{action:"type_search",text:args.text});
    }
-   if(simple==="browser_tabs")return browserCall(env,"bushin_browser_action",{action:"tabs",...(Number.isInteger(args.tab_index)?{tab_index:args.tab_index}:{})});
+   if(simple==="browser_tabs")return browserCall(env,"bushin_browser_action",{action:"tabs",...(args.path==="new"?{path:"new"}:{}),...(Number.isInteger(args.tab_index)?{tab_index:args.tab_index}:{})});
    if(simple==="ui_screenshot_gallery")return browserCall(env,"bushin_browser_action",{action:"capture_gallery",urls:args.urls});
    if(["browser_live_view","browser_takeover","ui_live_panel"].includes(simple))
      return {...(await browserCall(env,"bushin_browser_status")),note:"Visualizador seguro noVNC externo, NÃO incorporado ao chat Android. O link privado para entrar é mostrado somente no GitHub Actions da sessão."};

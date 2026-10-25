@@ -3,16 +3,16 @@
  * authenticated runner. No GitHub PAT, Discord user token or cookies in runner
  * commands. Every command is revalidated by browser_actions/live_controller.py.
  */
-const REPO="educacaomggovbr00-web/shinobi-ai-agent";
+const REPO="hp0592553-cyber/naruto-rpg-ia";
 const REF=REPO+"/.github/workflows/bushin-discord-live.yml@refs/heads/main";
 const SMOKE_REF=REPO+"/.github/workflows/bushin-oidc-bridge-smoke.yml@refs/heads/main";
 const ISS="https://token.actions.githubusercontent.com";
 const AUD="bushin-cloudflare-visual-v1";
 const GUILD="1515877468299595919";
-const OWNER_ID="260082480",REPO_ID="1424794298";
+const OWNER_ID="259182200",REPO_ID="1429981222";
 const OIDC_SUBJECTS=new Set([
  "repo:"+REPO+":ref:refs/heads/main",
- "repo:educacaomggovbr00-web@"+OWNER_ID+"/shinobi-ai-agent@"+REPO_ID+":ref:refs/heads/main"
+ "repo:hp0592553-cyber@"+OWNER_ID+"/naruto-rpg-ia@"+REPO_ID+":ref:refs/heads/main"
 ]);
 const millis=()=>Date.now();
 const enc=new TextEncoder();
@@ -174,7 +174,7 @@ export async function visualRunner(req,env,{seal=null}={}){
    if(Number(req.headers.get("content-length")||0)>18000)return fail("Result too large",413);
    const raw=await req.text();if(raw.length>18000)return fail("Result too large",413);
    const data=JSON.parse(raw);
-   if(typeof data.id!=="string"||! /^visual_[a-f0-9]{32}$/.test(data.id)||typeof data.ok!=="boolean")
+   if(typeof data.id!=="string"||! /^(?:visual_[a-f0-9]{32}|bushin-[a-f0-9-]{36})$/.test(data.id)||typeof data.ok!=="boolean")
      return fail("Invalid command result");
    const res=JSON.stringify(data.ok?data.data:data.error||"Action failed");
    if(res.length>13500)return fail("Result too large",413);

@@ -21,7 +21,9 @@ test('active D1 screenshot is queued once, never described as captured',async t=
  t.mock.method(globalThis,'fetch',()=>{throw Error('Unexpected network');});
  const {env,queries}=environment();
  const r=await browserCall(env,'bushin_browser_action',{action:'screenshot'});
- assert.equal(r.state,'queued');assert.equal(r.action,'screenshot');assert.match(r.command_id,/^visual_[a-f0-9]{32}$/);
+ assert.equal(r.state,'queued');assert.equal(r.action,'screenshot');
+ const resultSchema=(await import('../browser-bridge.mjs')).BROWSER_TOOLS.find(t=>t.name==='bushin_browser_result').inputSchema;
+ assert.match(r.command_id,new RegExp(resultSchema.properties.command_id.pattern));
  assert.equal(r.session_id,'12345678901');assert.equal(r.data,undefined);
  const inserts=queries.filter(q=>q.sql.startsWith('INSERT'));assert.equal(inserts.length,1);
  assert.equal(inserts[0].args[1],'screenshot');assert.equal(inserts[0].args[2],'{"action":"screenshot"}');

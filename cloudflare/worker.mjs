@@ -16,6 +16,13 @@ import {visualRunner,visualMobile,visualTakeover} from "./visual-bridge.mjs";
 import {discordCall,officialBotDmReady,officialBotIdentity} from "./discord-suite.mjs";
 import {NARUTO_TOOLS,NARUTO_TOOL_NAMES,narutoCall} from "./naruto-rpg.mjs";
 import {PERSONAL_TOOLS,PERSONAL_NAMES,personalCall} from "./personal-discord.mjs";
+import {personalForumThreads} from "./personal-discord.mjs";
+import {personalListChannels} from "./personal-discord.mjs";
+import {personalInspectCommand,personalInvokeProfileProbe} from "./personal-discord.mjs";
+import {PANEL_HTML,PANEL_JS} from "./discord2-ui.mjs";
+import {bushinAiNext} from "./discord2-ai.mjs";
+import {bushinAutoRp} from "./discord2-autorp.mjs";
+import {searchHenriqueMessages,scanRpgChannels} from "./discord2-research.mjs";
 const DISCORD_CLIENT_ID="1561589128108314636";
 const NARUTO_GUILD_ID="1515877468299595919";
 const SCOPES=["identify","guilds","guilds.members.read"];
@@ -193,7 +200,7 @@ async function discordToken(env,data){
   return {access:j.access_token,refresh:j.refresh_token,expires:now()+j.expires_in*1000,scope:j.scope};
 }
 async function discordFetch(token,path){
-  if(!["/users/@me","/users/@me/guilds/"+NARUTO_GUILD_ID+"/member"].includes(path))
+  if(!["/users/@me","/users/@me/guilds","/users/@me/guilds/"+NARUTO_GUILD_ID+"/member"].includes(path))
     throw Error("Unapproved Discord API endpoint");
   const res=await fetch(DISCORD+path,{headers:{
     authorization:"Bearer "+token,accept:"application/json"
@@ -381,7 +388,11 @@ async function mcp(req,env){
     if(!activeTools.some(t=>t.name===name))return rpcError(id,-32601,"Unknown tool");
     let me;
     try{
-      me=await verified(env,auth.creds);
+      // Local diagnostics use the already validated, unexpired owner OAuth session.
+      // Browser dispatch retains owner-session checks, argument validation and owner-scoped D1 queues.
+      me=["bushin_browser_status","bushin_browser_result","bushin_browser_action","bushin_browser_tabs"].includes(name)
+        ? {id:auth.record.user_id}
+        : await verified(env,auth.creds);
       let data=name==="bushin_discord_profile"?discordProfileData(me):
         name==="bushin_session_status"?{
           state:"connected",mcp_oauth_authenticated:true,
@@ -410,6 +421,12 @@ async function mcp(req,env){
       }
       return rpc(id,{content:[{type:"text",text:JSON.stringify(data)}],structuredContent:data});
     }catch(e){
+      // A revoked upstream OAuth grant must trigger client reauthorization,
+      // rather than being disguised as an ordinary failed tool invocation.
+      if(e.status===401&&e.errorCode==="invalid_grant")return reply({error:"invalid_token",error_description:"Discord authorization expired."},401,{
+        "www-authenticate":'Bearer error="invalid_token", resource_metadata="'+base(env)+'/.well-known/oauth-protected-resource"',
+        "cache-control":"no-store"
+      });
       if(ADVANCED_NAMES.has(name)&&me?.id)await logToolAction(env,{me},name,"failed").catch(()=>{});
       return rpc(id,{isError:true,content:[{type:"text",text:e.message||"Discord check failed"}]});
     }
@@ -459,7 +476,7 @@ async function mobileHome(req,env){
    if(row?.user_id===env.BUSHIN_OWNER_DISCORD_ID){
      try{const c=await unseal(row.creds_encrypted,env);if(c.expires>now()+30000){
        const me=await verified(env,c);
-       return mPage("Discord conectado",'<p class="ok">✓ Conta verificada</p><div class="user">'+mEsc(me.display_name)+'</div><p>@'+mEsc(me.username)+'</p><p class="ok">✓ Membro do Naruto Project RP</p><a class="button" href="/mobile/dm">DM de teste do Bushin</a><a class="button" href="/mobile/visual">Controle visual do navegador</a><a class="button" href="/mobile/workspace">Tarefas e memória — usar agora</a><a class="button" href="/mobile/servers">Meus servidores Discord</a><a class="button" href="/mobile/features">Ver ferramentas do Bushin</a><a class="button" href="/mobile/commands">Autorizar comandos pessoais do Bushin</a><p class="muted">OAuth applications.commands: instalar o aplicativo na sua conta, sem permissao de administrador do servidor. Nao permite ler mensagens nem enviar como sua conta. O Discord precisa oferecer instalacao por usuario e o Bushin precisa registrar os comandos.</p><form method="post" action="/mobile/logout"><button class="button" type="submit">Desconectar</button></form>');
+       return mPage("Discord conectado",'<p class="ok">✓ Conta verificada</p><div class="user">'+mEsc(me.display_name)+'</div><p>@'+mEsc(me.username)+'</p><p class="ok">✓ Membro do Naruto Project RP</p><a class="button" href="/mobile/dm">DM de teste do Bushin</a><a class="button" href="/mobile/visual">Controle visual do navegador</a><a class="button" href="/mobile/workspace">Tarefas e memória — usar agora</a><a class="button" href="/mobile/discord2">🍥 Abrir Discord 2 — painel conectado</a><a class="button" href="/mobile/servers">Meus servidores Discord</a><a class="button" href="/mobile/features">Ver ferramentas do Bushin</a><a class="button" href="/mobile/commands">Autorizar comandos pessoais do Bushin</a><p class="muted">OAuth applications.commands: instalar o aplicativo na sua conta, sem permissao de administrador do servidor. Nao permite ler mensagens nem enviar como sua conta. O Discord precisa oferecer instalacao por usuario e o Bushin precisa registrar os comandos.</p><form method="post" action="/mobile/logout"><button class="button" type="submit">Desconectar</button></form>');
      }}catch{}
    }
  }
@@ -777,6 +794,151 @@ export default {
     try{
       const b=base(env);
       if(new URL(req.url).origin!==b)return reply({error:"Unrecognized host"},403);
+      if(path==="/mobile/discord2"&&req.method==="GET"){
+        const row=await mobileSessionOwner(req,env);
+        if(!row)return mGo("/mobile");
+        return new Response(PANEL_HTML,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://media.tenor.com https://c.tenor.com https://*.giphy.com; media-src https://cdn.discordapp.com https://media.discordapp.net https://media.tenor.com https://c.tenor.com https://*.giphy.com; frame-ancestors 'none'; base-uri 'none'","x-content-type-options":"nosniff"}});
+      }
+      if(path==="/mobile/discord2/app.js"&&req.method==="GET"){
+        const row=await mobileSessionOwner(req,env);
+        if(!row)return reply({error:"login_required"},401);
+        return new Response(PANEL_JS,{headers:{"content-type":"text/javascript; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"}});
+      }
+      if(path.startsWith("/mobile/discord2/api/")){
+        const row=await mobileSessionOwner(req,env);
+        if(!row)return reply({state:"unauthorized",error:"Faça login no Bushin em /mobile"},401,{"cache-control":"no-store"});
+        const ctx={me:{id:row.user_id,membership:{guild_id:NARUTO_GUILD_ID,member:true}}},headers={"cache-control":"no-store","x-content-type-options":"nosniff"};
+        if(path==="/mobile/discord2/api/channels"&&req.method==="GET"){
+          const auth=await unseal(row.creds_encrypted,env);
+          if(auth.expires<=now()+30000)return reply({state:"unauthorized",error:"Login Discord expirado. Entre novamente pelo Bushin."},401,headers);
+          const [member,guilds]=await Promise.all([
+            discordFetch(auth.access,"/users/@me/guilds/"+NARUTO_GUILD_ID+"/member"),
+            discordFetch(auth.access,"/users/@me/guilds")
+          ]);
+          const guild=Array.isArray(guilds)?guilds.find(g=>String(g.id)===NARUTO_GUILD_ID):null;
+          const basePermissions=guild?.permissions??guild?.permissions_new;
+          if(!member||!Array.isArray(member.roles)||!/^[0-9]+$/.test(String(basePermissions??"")))
+            return reply({state:"unavailable",error:"Não consegui verificar cargos e permissões. Não vou exibir canais sem verificação."},503,headers);
+          const r=await personalListChannels(env,{...ctx,channelVisibility:{
+            memberId:row.user_id,roles:member.roles,basePermissions:String(basePermissions)
+          }});
+          return reply(r,r.listed?200:503,headers);
+        }
+        const forumPostRoute=path.match(/^\/mobile\/discord2\/api\/forum\/([0-9]{15,22})\/posts$/);
+        if(forumPostRoute&&req.method==="GET"){
+          const cursor=new URL(req.url).searchParams.get("before")||null;
+          const result=await personalForumThreads(env,forumPostRoute[1],ctx,cursor);
+          return reply(result,result.listed?200:503,headers);
+        }
+        if(path==="/mobile/discord2/api/commands"&&req.method==="GET"){
+          const inspected=await personalInspectCommand(env,{command:"/perfil ver"},ctx);
+          return reply(inspected,inspected.catalog_verified===true?200:503,headers);
+        }
+        if(path==="/mobile/discord2/api/search/mine"&&req.method==="POST")return await searchHenriqueMessages(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
+        if(path==="/mobile/discord2/api/ai/scan"&&req.method==="POST")return await scanRpgChannels(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
+        if(path==="/mobile/discord2/api/ai/next"&&req.method==="POST")return await bushinAiNext(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
+        if(path==="/mobile/discord2/api/ai/autorp")return await bushinAutoRp(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
+
+        if(path==="/mobile/discord2/api/ai/opencode"){
+          const HEAD={"cache-control":"no-store","x-content-type-options":"nosniff"};
+          const owner=String(ctx.me?.id||"");
+          const REPO="hp0592553-cyber/naruto-rpg-ia",KEY="bushin_opencode_runner_v1",WF="opencode-projeto.yml";
+          if(owner!==String(env.BUSHIN_OWNER_DISCORD_ID||"")||ctx.me?.membership?.member!==true)return reply({error:"A conta autorizada do Henrique é necessária."},403,HEAD);
+          if(typeof env.BUSHIN_GITHUB_TOKEN!=="string"||env.BUSHIN_GITHUB_TOKEN.length<20)return reply({error:"Token GitHub do Worker não configurado."},503,HEAD);
+          const requestGitHub=async (route,method="GET",payload=null)=>{
+            const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),12000);
+            try{
+              const response=await fetch("https://api.github.com/repos/"+REPO+route,{method,redirect:"error",signal:ctrl.signal,headers:{
+                Authorization:"Bearer "+env.BUSHIN_GITHUB_TOKEN,Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28","User-Agent":"Bushin-Naruto-Agent",
+                ...(payload?{"Content-Type":"application/json"}:{})},...(payload?{body:JSON.stringify(payload)}:{})});
+              if(response.status===204||response.status===202)return {ok:true,status:response.status,data:null};
+              if(!response.ok)return {ok:false,error:"GitHub retornou HTTP "+response.status,status:response.status};
+              return {ok:true,data:await response.json(),status:response.status};
+            }catch{return {ok:false,error:"Não foi possível conectar ao GitHub Actions.",status:503}}finally{clearTimeout(timeout)}
+          };
+          const getState=async()=>{try{const r=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(owner,KEY).first();return r?JSON.parse(r.value_json):null}catch{return null}};
+          const save=async(value,minAge=0)=>{
+            const now=Date.now(),result=await env.DB.prepare(
+              "INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at WHERE bushin_project_state.updated_at < ?")
+            .bind(owner,KEY,JSON.stringify(value),now,now-minAge).run();return Number(result.meta?.changes||0)===1;
+          };
+          const getRuns=()=>requestGitHub("/actions/workflows/"+WF+"/runs?branch=Projeto&event=workflow_dispatch&per_page=15");
+          const candidate=(runs,st)=>runs.filter(r=>r.head_branch==="Projeto"&&Number(r.run_number||0)>Number(st.baseline||0)&&Date.parse(r.created_at||"")>=Number(st.at||0)-15000).sort((a,b)=>Number(a.run_number)-Number(b.run_number))[0]||null;
+          const publicRun=r=>r?{id:String(r.id),url:"https://github.com/"+REPO+"/actions/runs/"+r.id,status:String(r.status||"unknown"),conclusion:String(r.conclusion||""),run_number:Number(r.run_number||0)}:null;
+          if(req.method==="GET"){
+            const st=await getState();if(!st)return reply({state:"idle",executed:false,confirmed:false},200,HEAD);
+            const runs=await getRuns();if(!runs.ok)return reply({state:"unavailable",error:runs.error,requested_at:st.at},503,HEAD);
+            const r=candidate(runs.data?.workflow_runs||[],st);
+            if(!r)return reply({state:st.phase||"requested",requested_at:st.at,run:null,executed:false,confirmed:false,note:"GitHub pode demorar a listar um workflow recém-solicitado."},200,HEAD);
+            return reply({state:r.status==="completed"?"finished":r.status,run:publicRun(r),requested_at:st.at,executed:false,confirmed:false,
+              note:r.status==="completed"?"Workflow finalizado. Confira o artefato naruto-jogada-tentativa para confirmar ação e resposta, não somente a conclusão do GitHub.":"Workflow "+String(r.status)+"; nenhuma jogada comprovada ainda."},200,HEAD);
+          }
+          if(req.method!=="POST")return reply({error:"Método não permitido"},405,HEAD);
+          if(req.headers.get("origin")!==base(env))return reply({error:"Origem inválida"},403,HEAD);
+          if(!(req.headers.get("content-type")||"").startsWith("application/json"))return reply({error:"Formato inválido"},415,HEAD);
+          const raw=await req.text();if(raw.length>250)return reply({error:"Pedido longo demais"},413,HEAD);
+          let data;try{data=JSON.parse(raw)}catch{return reply({error:"JSON inválido"},400,HEAD)}
+          if(!["start","stop"].includes(data?.action))return reply({error:"Ação inválida"},400,HEAD);
+          const st=await getState();
+          if(data.action==="start"){
+            if(st&&Date.now()-Number(st.at||0)<600000)return reply({state:"cooldown",error:"Já foi solicitada uma tentativa nos últimos 10 minutos. Consulte o estado para não repetir."},409,HEAD);
+            const runs=await getRuns();if(!runs.ok)return reply({error:runs.error},503,HEAD);
+            const rows=runs.data?.workflow_runs||[];
+            if(rows.some(r=>r.head_branch==="Projeto"&&["queued","in_progress","waiting","requested"].includes(r.status)))
+              return reply({state:"busy",error:"Já há uma execução OpenCode em andamento. Não vou duplicá-la."},409,HEAD);
+            const now=Date.now(),baseline=Math.max(0,...rows.map(r=>Number(r.run_number||0)));
+            const reservation={at:now,baseline,phase:"dispatching",stopped:false};
+            try{if(!(await save(reservation,600000)))return reply({state:"busy",error:"Outra tentativa já foi reservada."},409,HEAD)}catch{return reply({error:"Falha ao reservar tentativa no banco de dados."},503,HEAD)}
+            const sent=await requestGitHub("/actions/workflows/"+WF+"/dispatches","POST",{ref:"Projeto",inputs:{mode:"jogar"}});
+            if(!sent.ok){await save({...reservation,phase:"failed",reason:sent.error}).catch(()=>{});return reply({state:"unavailable",error:sent.error,submitted:false},503,HEAD)}
+            await save({...reservation,phase:"requested"}).catch(()=>{});
+            return reply({state:"requested",submitted:true,executed:false,confirmed:false,command:"/missoes minhas",
+             note:"GitHub recebeu a solicitação do executor. O Naruto Bot ainda não confirmou nenhum comando; o workflow tentará uma consulta única de missões."},200,HEAD);
+          }
+          if(!st)return reply({state:"stopped",reason:"Nenhuma execução anterior."},200,HEAD);
+          const runs=await getRuns();if(!runs.ok)return reply({state:"unavailable",error:runs.error},503,HEAD);
+          const r=candidate(runs.data?.workflow_runs||[],st);
+          if(r&&["queued","in_progress","waiting","requested"].includes(r.status)){
+            const cancel=await requestGitHub("/actions/runs/"+r.id+"/cancel","POST");
+            await save({...st,stopped:true,phase:cancel.ok?"cancel_requested":"cancel_failed"}).catch(()=>{});
+            return reply({state:cancel.ok?"cancel_requested":"unavailable",run:publicRun(r),stopped:cancel.ok,reason:cancel.ok?"GitHub recebeu o pedido de cancelamento.":cancel.error},cancel.ok?200:503,HEAD);
+          }
+          await save({...st,stopped:true,phase:"stop_requested"}).catch(()=>{});
+          return reply({state:"stop_requested",stopped:false,reason:"Nenhum workflow em execução foi identificado para cancelar."},200,HEAD);
+        }
+
+        if(path==="/mobile/discord2/api/ai/profile-probe"&&req.method==="POST"){
+          if(req.headers.get("origin")!==base(env))return reply({error:"Origem inválida"},403,headers);
+          if(!(req.headers.get("content-type")||"").startsWith("application/json"))return reply({error:"JSON inválido"},415,headers);
+          const result=await personalInvokeProfileProbe(env,ctx);
+          return reply(result,result.submitted===true?200:result.state==="unknown"?202:422,headers);
+        }
+        const m=path.match(/^\/mobile\/discord2\/api\/channels\/([0-9]{15,22})\/messages$/);
+        if(m){
+          const channel_id=m[1];
+          if(req.method==="GET"){
+            const u=new URL(req.url),before=u.searchParams.get("before")||undefined;
+            if(before&&!/^[0-9]{15,22}$/.test(before))return reply({error:"Cursor inválido"},400,headers);
+            const r=await personalCall(env,"bushin_naruto_personal_read",{channel_id,limit:12,...(before?{before}:{})},ctx);
+            return reply(r,r.read?200:503,headers);
+          }
+          if(req.method==="POST"){
+            if(req.headers.get("origin")!==base(env))return reply({error:"Origem inválida"},403,headers);
+            if(!(req.headers.get("content-type")||"").startsWith("application/json"))return reply({error:"Tipo inválido"},415,headers);
+            const raw=await req.text();
+            if(raw.length>1400)return reply({error:"Mensagem grande demais"},413,headers);
+            let data;try{data=JSON.parse(raw)}catch{return reply({error:"JSON inválido"},400,headers)}
+            if(data?.confirmed!==true||typeof data?.content!=="string")return reply({error:"Confirmação ausente"},400,headers);
+            const mentionIds=Array.isArray(data.mention_ids)?data.mention_ids:[];
+            if(mentionIds.length>5||!mentionIds.every(id=>/^[0-9]{15,22}$/.test(String(id))&&data.content.includes("<@"+id+">")))return reply({error:"Marcações inválidas"},400,headers);
+            const replyId=data.reply_to===undefined?null:String(data.reply_to);
+            if(replyId!==null&&!/^[0-9]{15,22}$/.test(replyId))return reply({error:"Resposta inválida"},400,headers);
+            const r=await personalCall(env,"bushin_naruto_personal_send",{channel_id,text:data.content,confirmed:true,mention_ids:mentionIds,...(replyId?{reply_to:replyId}:{})},ctx);
+            return reply(r,r.sent?200:r.state==="unknown"?202:422,headers);
+          }
+        }
+        return reply({error:"Rota não encontrada"},404,headers);
+      }
       if((path==="/"||path==="/mobile")&&req.method==="GET")return await mobileHome(req,env);
       if(path==="/mobile/features"&&req.method==="GET")return await mobileFeatures(req,env);
       if(path==="/mobile/visual/takeover"&&req.method==="GET"){

@@ -62,10 +62,10 @@ export function normalizeMessage(message, {channelId = null, depth = 0} = {}) {
   if(text.join("\n").length>normalized_text.length)truncated=true;
   const hasMedia=attachments.length>0||components.some(c=>JSON.stringify(c).includes('"media":'))||embeds.some(e=>e.image||e.video||e.thumbnail);
   return {id:snowflake(m.id),channel_id:snowflake(m.channel_id)||snowflake(channelId),author_id:snowflake(m.author?.id),
-    author_name:str(m.author?.username,80),author_bot:m.author?.bot===true,type:m.type??null,
+    author_name:str(m.author?.username,80),author_global_name:str(m.author?.global_name,80),author_nickname:str(m.member?.nick,80),author_avatar:str(m.author?.avatar,128),author_bot:m.author?.bot===true,type:m.type??null,
     content:str(m.content),timestamp:str(m.timestamp,50),edited_timestamp:str(m.edited_timestamp,50)||null,
     flags,components_v2:(flags&32768)!==0,ephemeral:(flags&64)!==0,loading:(flags&128)!==0,
-    embeds,components,attachments,interaction:interaction(m.interaction),interaction_metadata:interaction(m.interaction_metadata),
+    embeds,components,attachments,mentions:list(m.mentions,30).map(u=>({id:snowflake(u.id),username:str(u.username,80),global_name:str(u.global_name,80)})).filter(u=>u.id),mention_everyone:m.mention_everyone===true,interaction:interaction(m.interaction),interaction_metadata:interaction(m.interaction_metadata),
     message_reference:m.message_reference?{message_id:snowflake(m.message_reference.message_id),channel_id:snowflake(m.message_reference.channel_id),guild_id:snowflake(m.message_reference.guild_id)}:null,
     stickers:list(m.sticker_items,3).map(s=>({id:snowflake(s.id),name:str(s.name,100),format_type:s.format_type})),
     poll:m.poll?{question:str(m.poll.question?.text,300),answers:list(m.poll.answers,10).map(a=>({id:a.answer_id,text:str(a.poll_media?.text,300)}))}:null,
@@ -73,7 +73,7 @@ export function normalizeMessage(message, {channelId = null, depth = 0} = {}) {
     referenced_message:depth===0&&m.referenced_message?normalizeMessage(m.referenced_message,{depth:1}):null,
     normalized_text,controls,
     diagnostics:{text_sources:[...sources],component_nodes:Math.min(nodes,100),truncated,
-      available_fields:["content","embeds","components","attachments","interaction","interaction_metadata","message_snapshots","referenced_message","poll"].filter(k=>Object.hasOwn(m,k)),
+      available_fields:["content","embeds","components","attachments","interaction","interaction_metadata","message_snapshots","referenced_message","mentions","poll"].filter(k=>Object.hasOwn(m,k)),
       snapshot_count:list(m.message_snapshots,10).length,referenced_message_id:snowflake(m.referenced_message?.id),
       empty_reason:normalized_text?null:hasMedia?"media_without_extracted_text":"no_text_in_returned_fields"},
     untrusted_game_data:true};
