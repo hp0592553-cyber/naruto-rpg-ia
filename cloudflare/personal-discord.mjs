@@ -36,9 +36,11 @@ function secret(env){
  return value.trim();
 }
 // Obey Discord's 429 retry window. This never retries a failed send.
-let upstreamPauseUntil=0;
+// Keep pauses isolated by the credential, without storing the token itself.
+const upstreamPauseByFingerprint=new Map();
+function tokenFingerprint(token){let hash=2166136261;for(let i=0;i<token.length;i++)hash=Math.imul(hash^token.charCodeAt(i),16777619);return hash>>>0;}
 async function request(token,path,method="GET",body=null){
- if(Date.now()<upstreamPauseUntil){const remaining=Math.max(1,Math.ceil((upstreamPauseUntil-Date.now())/1000));return {state:"unavailable",code:429,retry_after_seconds:remaining,reason:"Discord pediu uma pausa de "+remaining+" segundos. Nenhuma nova requisição foi enviada."};}
+ const fingerprint=tokenFingerprint(token),upstreamPauseUntil=upstreamPauseByFingerprint.get(fingerprint)||0;if(Date.now()<upstreamPauseUntil){const remaining=Math.max(1,Math.ceil((upstreamPauseUntil-Date.now())/1000));return {state:"unavailable",code:429,retry_after_seconds:remaining,reason:"Discord pediu uma pausa de "+remaining+" segundos. Nenhuma nova requisição foi enviada."};}
  const controller=new AbortController();
  const timeout=setTimeout(()=>controller.abort(),12000);
  try{
@@ -47,7 +49,7 @@ async function request(token,path,method="GET",body=null){
    const res=await fetch(API+path,options);
    if(res.status===401)return {state:"unavailable",reason:"Token pessoal recusado (401).",code:401};
    if(res.status===403)return {state:"unavailable",reason:"Acesso negado pelo Discord (403); nenhum contorno de bloqueio será tentado.",code:403};
-   if(res.status===429){let body=null;try{body=await res.json()}catch{}const header=Number.parseFloat(res.headers.get("retry-after")||res.headers.get("x-ratelimit-reset-after")||"");const jsonSeconds=Number(body?.retry_after);const raw=Number.isFinite(header)&&header>0?header:Number.isFinite(jsonSeconds)&&jsonSeconds>0?jsonSeconds:30;const seconds=Math.min(900,Math.max(1,Math.ceil(raw)));upstreamPauseUntil=Math.max(upstreamPauseUntil,Date.now()+seconds*1000);return {state:"unavailable",reason:"Discord limitou requisições (429). Aguarde "+seconds+" segundos, sem repetição automática.",code:429,retry_after_seconds:seconds};}
+   if(res.status===429){let body=null;try{body=await res.json()}catch{}const header=Number.parseFloat(res.headers.get("retry-after")||res.headers.get("x-ratelimit-reset-after")||"");const jsonSeconds=Number(body?.retry_after);const raw=Number.isFinite(header)&&header>0?header:Number.isFinite(jsonSeconds)&&jsonSeconds>0?jsonSeconds:30;const seconds=Math.min(900,Math.max(1,Math.ceil(raw)));upstreamPauseByFingerprint.set(fingerprint,Math.max(upstreamPauseUntil,Date.now()+seconds*1000));if(upstreamPauseByFingerprint.size>16){for(const [key,until] of upstreamPauseByFingerprint)if(until<=Date.now())upstreamPauseByFingerprint.delete(key)}return {state:"unavailable",reason:"Discord limitou requisições (429). Aguarde "+seconds+" segundos, sem repetição automática.",code:429,retry_after_seconds:seconds};}
    if(!res.ok)return {state:"unavailable",reason:"Discord retornou HTTP "+res.status,code:res.status};
    const data=await res.json();
    return {state:"completed",data};
