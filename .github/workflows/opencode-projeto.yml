@@ -30,6 +30,9 @@ concurrency:
 
 jobs:
   comando:
+    permissions:
+      contents: read
+      id-token: write
     if: github.ref == 'refs/heads/Projeto' && inputs.mode == 'comando'
     name: Executar comando escolhido no Discord 2
     runs-on: ubuntu-latest
@@ -49,6 +52,7 @@ jobs:
       - name: Executar uma vez e exigir resposta correlacionada
         env:
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+          RPG_REQUEST_ID: ${{ inputs.request_id }}
           RPG_COMMAND_JSON: ${{ inputs.command_json }}
           RPG_MODE: jogar
           RPG_ACTION_MARKER: ${{ runner.temp }}/discord2-command-reserved
