@@ -788,12 +788,54 @@ async function mobileLogout(req,env){
  return mGo("/mobile",[mSet(M_SESSION,"",0)]);
 }
 
+
+async function receivePrivateCommandResult(req,env){
+ const fail=(status)=>reply({saved:false},status,{"cache-control":"no-store"});
+ if(req.method!=="POST")return fail(405);
+ try{
+  const token=(req.headers.get("authorization")||"").replace(/^Bearer /,"");
+  if(token.length>16000)return fail(401);
+  const parts=token.split(".");if(parts.length!==3)return fail(401);
+  const header=JSON.parse(dec.decode(bytesFrom64(parts[0]))),claims=JSON.parse(dec.decode(bytesFrom64(parts[1])));
+  const current=Math.floor(Date.now()/1000),repo="hp0592553-cyber/naruto-rpg-ia";
+  if(header.alg!=="RS256"||claims.iss!=="https://token.actions.githubusercontent.com"||
+     claims.aud!==base(env)+"/internal/discord2-result"||claims.repository!==repo||
+     String(claims.repository_id)!=="1429981222"||String(claims.repository_owner_id)!=="259182200"||
+     claims.ref!=="refs/heads/Projeto"||claims.event_name!=="workflow_dispatch"||
+     claims.workflow_ref!==repo+"/.github/workflows/opencode-projeto.yml@refs/heads/Projeto"||
+     !Number.isFinite(claims.exp)||claims.exp<=current||claims.nbf>current+30||
+     !Number.isFinite(claims.iat)||claims.iat<current-900||claims.iat>current+30)return fail(401);
+  const jwks=await fetch("https://token.actions.githubusercontent.com/.well-known/jwks",{redirect:"manual",signal:AbortSignal.timeout(10000)});
+  if(!jwks.ok)return fail(503);
+  const jwk=(await jwks.json()).keys?.find(k=>k.kid===header.kid&&k.kty==="RSA");if(!jwk)return fail(401);
+  const key=await crypto.subtle.importKey("jwk",jwk,{name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["verify"]);
+  if(!await crypto.subtle.verify("RSASSA-PKCS1-v1_5",key,bytesFrom64(parts[2]),enc.encode(parts[0]+"."+parts[1])))return fail(401);
+  if(Number(req.headers.get("content-length")||0)>180000)return fail(413);
+  const raw=await req.text();if(raw.length>180000)return fail(413);const data=JSON.parse(raw);
+  if(!/^[a-f0-9-]{36}$/.test(data.request_id||""))return fail(400);
+  const owner=String(env.BUSHIN_OWNER_DISCORD_ID),stateRow=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(owner,"bushin_opencode_runner_v1").first();
+  const st=stateRow?JSON.parse(stateRow.value_json):null;
+  if(!st||st.request_id!==data.request_id||Date.now()-st.at>600000)return fail(409);
+  const run=await fetch("https://api.github.com/repos/"+repo+"/actions/runs/"+encodeURIComponent(claims.run_id),{redirect:"manual",signal:AbortSignal.timeout(10000),headers:{Authorization:"Bearer "+env.BUSHIN_GITHUB_TOKEN,Accept:"application/vnd.github+json","User-Agent":"Bushin-Result"}});
+  if(!run.ok)return fail(503);const record=await run.json();
+  if(record.display_title!=="Discord 2 "+st.request_id||record.head_branch!=="Projeto"||record.event!=="workflow_dispatch")return fail(403);
+  const m=data.response;
+  if(!m||m.channel_id!==st.channel_id||m.author_id!=="1515908078913192026"||!/^[0-9]{15,22}$/.test(m.message_id||"")||
+     !/^[0-9]{15,22}$/.test(m.channel_id||"")||!Array.isArray(m.embeds)||!Array.isArray(m.components))return fail(400);
+  const result={response:m,run_id:String(claims.run_id),received_at:Date.now()};
+  await env.DB.prepare("INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO NOTHING")
+   .bind(owner,"discord2-private:"+st.request_id,JSON.stringify({sealed:await seal(result,env)}),Date.now()).run();
+  return reply({saved:true},200,{"cache-control":"no-store"});
+ }catch{return fail(400)}
+}
+
 export default {
   async fetch(req,env){
     const path=new URL(req.url).pathname;
     try{
       const b=base(env);
       if(new URL(req.url).origin!==b)return reply({error:"Unrecognized host"},403);
+      if(path==="/internal/discord2-result")return receivePrivateCommandResult(req,env);
       if(path==="/mobile/discord2"&&req.method==="GET"){
         const row=await mobileSessionOwner(req,env);
         if(!row)return mGo("/mobile");
@@ -873,6 +915,12 @@ export default {
             const st=await getState();
             const runs=await getRuns();if(!runs.ok)return reply({state:"unavailable",error:runs.error,upstream_status:runs.status,requested_at:st?.at,executed:false,confirmed:false},503,HEAD);
             if(!st)return reply({state:"idle",workflow_available:true,executed:false,confirmed:false,note:"Conexão com GitHub Actions confirmada; nenhuma execução solicitada."},200,HEAD);
+            let captured=null;
+            if(st?.request_id){try{
+             const saved=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(owner,"discord2-private:"+st.request_id).first();
+             if(saved)captured=await unseal(JSON.parse(saved.value_json).sealed,env);
+            }catch{}}
+            if(captured)return reply({state:"finished",command:st.command,requested_at:st.at,executed:true,confirmed:true,response:captured.response,note:"Resposta do Naruto Bot recebida e disponível no painel."},200,HEAD);
             const r=candidate(runs.data?.workflow_runs||[],st);
             if(!r)return reply({state:st.phase||"requested",requested_at:st.at,run:null,executed:false,confirmed:false,note:"GitHub pode demorar a listar um workflow recém-solicitado."},200,HEAD);
             return reply({state:r.status==="completed"?"finished":r.status,run:publicRun(r),requested_at:st.at,command:st.command,executed:st.mode==="comando"&&r.conclusion==="success",confirmed:st.mode==="comando"&&r.conclusion==="success",
@@ -894,7 +942,7 @@ export default {
             if(rows.some(r=>r.head_branch==="Projeto"&&["queued","in_progress","waiting","requested"].includes(r.status)))
               return reply({state:"busy",error:"Já há uma execução OpenCode em andamento. Não vou duplicá-la."},409,HEAD);
             const now=Date.now(),baseline=Math.max(0,...rows.map(r=>Number(r.run_number||0)));
-            const reservation={at:now,baseline,phase:"dispatching",stopped:false,request_id:commandRequest?crypto.randomUUID():null,mode:commandRequest?"comando":"jogar",command:commandRequest?.command||"/missoes minhas"};
+            const reservation={at:now,baseline,phase:"dispatching",stopped:false,request_id:commandRequest?crypto.randomUUID():null,mode:commandRequest?"comando":"jogar",channel_id:commandRequest?.channel_id||null,command:commandRequest?.command||"/missoes minhas"};
             try{if(!(await save(reservation,commandRequest?30000:600000)))return reply({state:"busy",error:"Outra tentativa já foi reservada."},409,HEAD)}catch{return reply({error:"Falha ao reservar tentativa no banco de dados."},503,HEAD)}
             const sent=await requestGitHub("/actions/workflows/"+WF+"/dispatches","POST",{ref:"Projeto",inputs:commandRequest?{mode:"comando",request_id:reservation.request_id,command_json:JSON.stringify(commandRequest)}:{mode:"jogar"}});
             if(!sent.ok){await save({...reservation,phase:"failed",reason:sent.error}).catch(()=>{});return reply({state:"unavailable",error:sent.error,submitted:false},503,HEAD)}
