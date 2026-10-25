@@ -47,3 +47,11 @@ Para habilitar execução oficial são necessários documentação e acesso conc
 - Desempenho instantâneo: iniciar um job Actions por comando continua tendo espera.
 
 Esses itens não devem ser marcados como concluídos por existir um botão, plano da IA ou workflow com conclusão `success`.
+
+## Verificação final
+
+- 77 testes JavaScript passaram.
+- 189 testes Python passaram; 1 ignorado; 14 subtestes passaram.
+- Os dois workflows de CI passaram na branch consolidada.
+- Planejamento no navegador sem ficha confirmada retorna estado desconhecido e não usa missões de outros jogadores.
+- RP automático legado bloqueado no servidor; não há execução automática por conta pessoal.

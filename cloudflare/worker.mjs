@@ -915,7 +915,10 @@ export default {
           const data=await result.json();return result.ok?{ok:true,plan:{analysis:data.analysis,next_step:data.next_step,model:data.model}}:{ok:false,error:data.error};
         }});
         if(path==="/mobile/discord2/api/ai/next"&&req.method==="POST")return await bushinAiNext(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
-        if(path==="/mobile/discord2/api/ai/autorp")return await bushinAutoRp(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
+        if(path==="/mobile/discord2/api/ai/autorp"){
+          const notice="RP automático por conta pessoal desativado. Aguardando integração autorizada do jogo.";
+          return reply(req.method==="GET"?{state:"blocked",enabled:false,last_result:notice}:{state:"blocked",enabled:false,error:notice},req.method==="GET"?200:409,{"cache-control":"no-store"});
+        }
 
         if(path==="/mobile/discord2/api/ai/opencode"){
           const HEAD={"cache-control":"no-store","x-content-type-options":"nosniff"};
