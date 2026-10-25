@@ -8,7 +8,7 @@ const CHAT_INTENTS=Object.freeze(["conversar","analisar","ficha","missoes","comb
 const safeText=(v,max)=>typeof v==="string"?v.replace(/\u0000/g,"").trim().slice(0,max):"";
 function safeHistory(history){
  return Array.isArray(history)?history.slice(-16).filter(m=>m&&["user","assistant"].includes(m.role))
-  .map(m=>({id:String(m.id||"").slice(0,60),role:m.role,text:safeText(m.text,2600),intent:String(m.intent||"").slice(0,20),at:Number(m.at||0)})):[];
+  .map(m=>({id:String(m.id||"").slice(0,60),role:m.role,text:safeText(m.text,2600),intent:String(m.intent||"").slice(0,20),at:Number(m.at||0),model:safeText(m.model,60)})):[];
 }
 async function addChatHistory(env,owner,message){
  const current=await readRecord(env,owner,KEY_CHAT);
