@@ -35,7 +35,12 @@ function secret(env){
  if(typeof value!=="string"||value.trim().length<35)return null;
  return value.trim();
 }
+// Per-credential 429 cooldown; never automatically replay blocked requests.
+const upstreamPauseByFingerprint=new Map();
+function tokenFingerprint(token){let hash=2166136261;for(let i=0;i<token.length;i++)hash=Math.imul(hash^token.charCodeAt(i),16777619);return hash>>>0;}
 async function request(token,path,method="GET",body=null){
+ const fingerprint=tokenFingerprint(token),upstreamPauseUntil=upstreamPauseByFingerprint.get(fingerprint)||0;
+ if(Date.now()<upstreamPauseUntil){const remaining=Math.max(1,Math.ceil((upstreamPauseUntil-Date.now())/1000));return {state:"unavailable",code:429,retry_after_seconds:remaining,reason:"Discord em pausa por 429: "+remaining+" segundos restantes. Nenhuma requisição enviada."};}
  const controller=new AbortController();
  const timeout=setTimeout(()=>controller.abort(),12000);
  try{
@@ -44,7 +49,7 @@ async function request(token,path,method="GET",body=null){
    const res=await fetch(API+path,options);
    if(res.status===401)return {state:"unavailable",reason:"Token pessoal recusado (401).",code:401};
    if(res.status===403)return {state:"unavailable",reason:"Acesso negado pelo Discord (403); nenhum contorno de bloqueio será tentado.",code:403};
-   if(res.status===429)return {state:"unavailable",reason:"Limite de requisições do Discord (429); tente mais tarde.",code:429};
+   if(res.status===429){let body=null;try{body=await res.json()}catch{} const h=Number.parseFloat(res.headers.get("retry-after")||res.headers.get("x-ratelimit-reset-after")||"");const j=Number(body?.retry_after);const raw=Number.isFinite(h)&&h>0?h:Number.isFinite(j)&&j>0?j:30;const seconds=Math.min(900,Math.max(1,Math.ceil(raw)));upstreamPauseByFingerprint.set(fingerprint,Math.max(upstreamPauseUntil,Date.now()+seconds*1000));if(upstreamPauseByFingerprint.size>16){for(const [k,until] of upstreamPauseByFingerprint)if(until<=Date.now())upstreamPauseByFingerprint.delete(k)}return {state:"unavailable",code:429,retry_after_seconds:seconds,reason:"Discord limitou requisições (429). Aguarde "+seconds+" segundos sem repetir."}}
    if(!res.ok)return {state:"unavailable",reason:"Discord retornou HTTP "+res.status,code:res.status};
    const data=await res.json();
    return {state:"completed",data};
@@ -120,7 +125,7 @@ export async function personalCall(env,name,args={},ctx={}){
  const record=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(ctx.me.id,key).first();
  const last=record?JSON.parse(record.value_json):null;
  const stamp=Date.now();
- if(last&&stamp-last.at<20000)return {state:"unavailable",reason:"Envio recente; aguarde 20 segundos para evitar duplicação.",sent:false};
+ if(last&&stamp-last.at<20000)return {state:"cooldown",retry_after_seconds:Math.ceil((20000-(stamp-last.at))/1000),reason:"Pausa preventiva entre mensagens: aguarde "+Math.ceil((20000-(stamp-last.at))/1000)+" segundos; nada foi reenviado.",sent:false};
  const mentions=Array.isArray(args.mention_ids)?[...new Set(args.mention_ids.map(String))]:[];
  if(mentions.length>5||!mentions.every(v=>id(v)&&message.includes("<@"+v+">")))return {state:"unavailable",reason:"IDs de marcação inválidos.",sent:false};
  const replyId=args.reply_to===undefined?null:String(args.reply_to);
@@ -206,7 +211,7 @@ export async function personalListChannels(env,ctx={}){
 }
 
 // Read-only index lookup matching discord.py-self 2.1.0. Never submits interactions.
-export async function personalInspectCommand(env,args={},ctx={}){
+async function personalInspectCommandRaw(env,args={},ctx={}){
  owner(env,ctx);
  if(typeof args.command!=="string"||!/^\/[a-z0-9_-]{1,32}( [a-z0-9_-]{1,32}){0,2}$/.test(args.command))throw Error("Informe o caminho do comando, sem valores de parâmetros.");
  const channelId=args.channel_id===undefined?"1520114348079583263":args.channel_id;
@@ -216,10 +221,10 @@ export async function personalInspectCommand(env,args={},ctx={}){
  const channel=await checkChannel(auth.token,channelId);
  if(channel.state!=="completed")return {...channel,catalog_verified:false,executed:false,sent:false};
  const result=await request(auth.token,"/guilds/"+GUILD+"/application-command-index");
- const direct=await request(auth.token,"/applications/1515908078913192026/commands");
+ const direct=result.code===429?{state:"unavailable",code:429}:Array.isArray(result.data?.application_commands)&&result.data.application_commands.some(c=>String(c.application_id)==="1515908078913192026")?{state:"completed",data:[]}:await request(auth.token,"/applications/1515908078913192026/commands");
  const index=Array.isArray(result.data?.application_commands)?result.data.application_commands:[];
  const directCommands=Array.isArray(direct.data)?direct.data.filter(c=>Number(c.type)===1):[];
- if(result.state!=="completed"&&!directCommands.length)return {state:"unavailable",catalog_verified:false,executed:false,sent:false,reason:result.reason||"Catálogo indisponível."};
+ if(result.state!=="completed"&&!directCommands.length)return {state:"unavailable",catalog_verified:false,executed:false,sent:false,reason:result.reason||"Catálogo indisponível.",...(Number.isInteger(result.code)?{code:result.code}:{}),...(result.retry_after_seconds?{retry_after_seconds:result.retry_after_seconds}:{})};
  if(!index.length&&!directCommands.length)return {state:"unavailable",catalog_verified:false,executed:false,sent:false,reason:"Nenhum comando verificado foi encontrado."};
  const option=(o,depth=0)=>({name:String(o.name||"").slice(0,100),type:o.type,description:String(o.description||"").slice(0,500),required:o.required===true,
   ...(depth<2&&Array.isArray(o.options)?{options:o.options.slice(0,25).map(x=>option(x,depth+1))}:{}),
@@ -248,11 +253,39 @@ export async function personalInspectCommand(env,args={},ctx={}){
 }
 
 
+
+export async function personalInspectCommand(env,args={},ctx={}){
+ owner(env,ctx);
+ const channelId=String(args.channel_id||"1520114348079583263"),who=String(ctx.me.id),cacheKey="discord2_catalog_cache_v7",now=Date.now();
+ if(!id(channelId)||typeof args.command!=="string"||!/^\/[a-z0-9_-]{1,32}( [a-z0-9_-]{1,32}){0,2}$/.test(args.command))throw Error("Solicitação de comando inválida.");
+ let saved=null;try{const row=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(who,cacheKey).first();if(row)saved=JSON.parse(row.value_json)}catch{}
+ const persist=async d=>{try{await env.DB.prepare("INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at").bind(who,cacheKey,JSON.stringify(d),Date.now()).run()}catch{}};
+ const hasCache=Array.isArray(saved?.commands)&&saved.commands.length>0;
+ const showCache=stale=>{
+  const segments=args.command.slice(1).split(" "),roots=saved.commands.filter(c=>String(c.application_id)==="1515908078913192026"&&c.name===segments[0]);
+  let match=roots.length===1?roots[0]:null;for(const name of segments.slice(1))match=match?.options?.find(o=>[1,2].includes(Number(o.type))&&o.name===name);
+  return {state:match?"command_found":"command_not_found",catalog_verified:true,commands:saved.commands,channel_id:channelId,guild_id:GUILD,cached:true,stale,synced_at:saved.at,requested_command:args.command,matched:match||null,command_found:!!match,channel_execution_permissions_verified:false,executor_status:"not_connected",executed:false,sent:false,note:stale?"Catálogo antigo: limite 429 ativo. Apenas visualização; não executa comandos.":"Comandos verificados anteriormente, cache de 10 minutos. Não executa comandos."};
+ };
+ if(Number(saved?.pauseUntil||0)>now){
+  if(hasCache)return {...showCache(true),code:429,retry_after_seconds:Math.ceil((saved.pauseUntil-now)/1000)};
+  return {state:"unavailable",catalog_verified:false,code:429,retry_after_seconds:Math.ceil((saved.pauseUntil-now)/1000),reason:"Discord limitou consultas (429). Aguarde a pausa antes de atualizar.",executed:false,sent:false};
+ }
+ if(hasCache&&now-Number(saved.at||0)<600000)return showCache(false);
+ const result=await personalInspectCommandRaw(env,args,ctx);
+ if(result?.code===429){
+  const v=Number(result.retry_after_seconds),seconds=Number.isFinite(v)&&v>0?Math.min(900,Math.ceil(v)):30;
+  await persist({...saved,pauseUntil:Date.now()+seconds*1000});
+  if(hasCache)return {...showCache(true),code:429,retry_after_seconds:seconds};
+ }else if(result?.catalog_verified===true&&Array.isArray(result.commands)&&result.commands.length)await persist({at:Date.now(),commands:result.commands,pauseUntil:0});
+ return result;
+}
+
 export async function personalInvokeProfileProbe(env,ctx={}) {
  const uid=owner(env,ctx),channelId="1520114348079583263",appId="1515908078913192026";
  const registry=await personalInspectCommand(env,{command:"/perfil ver",channel_id:channelId},ctx);
- if(registry.catalog_verified!==true)return {state:"unavailable",submitted:false,confirmed:false,
-  reason:registry.reason||"Discord não retornou um catálogo verificável; nenhuma interação foi enviada.",
+ if(registry.catalog_verified!==true||registry.stale===true||registry.code===429)return {state:"unavailable",submitted:false,confirmed:false,
+  reason:registry.reason||(registry.code===429?"Discord limitou consultas (429). Aguarde "+registry.retry_after_seconds+" segundos; nenhuma interação foi enviada.":"Discord não retornou um catálogo verificável; nenhuma interação foi enviada."),
+  ...(registry.retry_after_seconds?{retry_after_seconds:registry.retry_after_seconds}:{}),
   ...(registry.code?{discord_status:registry.code}:{}),stage:"command_catalog"};
  const auth=await authorize(env,ctx);
  if(auth.state!=="completed")return {state:"unavailable",submitted:false,confirmed:false,reason:auth.reason||"Identidade pessoal indisponível.",stage:"identity"};
