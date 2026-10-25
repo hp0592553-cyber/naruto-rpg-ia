@@ -160,3 +160,45 @@ test('RPG intent controls are on the main chat, separate from Discord send',()=>
  assert.match(PANEL_JS,/renderCodexConversation/);
  assert.doesNotThrow(()=>new Function(PANEL_JS));
 });
+
+
+test('Codex chat can use selected persisted channel scans without mixing other channels',async()=>{
+ const env={BUSHIN_OWNER_DISCORD_ID:owner,DB:fakeDb()};
+ const saved=JSON.stringify({recent:Date.now(),notes:{
+  '1520114348079583263':{summary:'Missões e comandos: explicação do Naruto Bot',updated_at:Date.now(),scope:'single_channel'},
+  '1532489544161562857':{summary:'Regras gerais do RP e evolução',updated_at:Date.now(),scope:'single_channel'},
+  '1543671277846274138':{summary:'Outro canal não selecionado',updated_at:Date.now(),scope:'single_channel'}
+ }});
+ env.DB.rows.set(owner+':discord2_rpg_scan',saved);
+ const h={reply,baseUrl};
+ let res=await codexBridgeMobile(mobile(),env,ctx,h);
+ assert.equal((await res.json()).scan_available_channels.length,3);
+ res=await codexBridgeMobile(mobile('POST',{action:'pair'}),env,ctx,h);
+ const {pair_code}=await res.json();
+ res=await codexBridgeAgent(internal('pair','POST',{pair_code}),env,{reply});
+ const {agent_token}=await res.json();
+ await codexBridgeAgent(internal('queue?capabilities=chat-v1','GET',null,agent_token),env,{reply});
+ res=await codexBridgeMobile(mobile('POST',{action:'chat',intent:'analisar',
+  question:'Analise apenas os canais selecionados.',
+  scan_scope:'selected',scan_channel_ids:['1520114348079583263','1532489544161562857'],
+  current_channel_id:'1520114348079583263',context:'Mensagem carregada no navegador'}),env,ctx,h);
+ assert.equal(res.status,202);
+ assert.equal((await res.json()).included_scan_notes,2);
+ res=await codexBridgeAgent(internal('queue?capabilities=chat-v1','GET',null,agent_token),env,{reply});
+ const data=(await res.json()).job;
+ assert.match(data.prompt,/Missões e comandos/);
+ assert.match(data.prompt,/Regras gerais/);
+ assert.doesNotMatch(data.prompt,/Outro canal não selecionado/);
+ assert.match(data.prompt,/Resumos podem misturar|resumos podem misturar/i);
+ assert.ok(data.prompt.length<=9500);
+});
+test('Channel analysis controls are part of the conversational panel',()=>{
+ assert.match(PANEL_HTML,/id="openCodexChat"/);
+ assert.match(PANEL_HTML,/id="codexScanCurrent"/);
+ assert.match(PANEL_HTML,/id="codexScanAll"/);
+ assert.match(PANEL_HTML,/id="codexChannelChoices"/);
+ assert.match(PANEL_HTML,/id="codexScanScope"/);
+ assert.match(PANEL_JS,/beginChatScan/);
+ assert.match(PANEL_JS,/scan_channel_ids:codexPickedChannelIds/);
+ assert.doesNotThrow(()=>new Function(PANEL_JS));
+});
