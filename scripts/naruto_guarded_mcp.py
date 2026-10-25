@@ -103,10 +103,16 @@ async def status():
 
 
 def message_data(message):
+    metadata = getattr(message, 'interaction', None) or getattr(message, 'interaction_metadata', None)
+    user = getattr(metadata, 'user', None)
     return {'message_id': str(message.id), 'author_id': str(message.author.id),
             'channel_id': str(message.channel.id), 'content': message.content,
+            'timestamp': message.created_at.isoformat(), 'flags': message.flags.value,
             'embeds': [embed.to_dict() for embed in message.embeds],
             'components': [component.to_dict() for component in getattr(message, 'components', [])],
+            'attachments': [attachment.to_dict() for attachment in message.attachments],
+            'interaction_metadata': {'id': str(getattr(metadata, 'id', '')),
+                'user_id': str(getattr(user, 'id', ''))},
             'ephemeral': bool(getattr(message.flags, 'ephemeral', False))}
 
 

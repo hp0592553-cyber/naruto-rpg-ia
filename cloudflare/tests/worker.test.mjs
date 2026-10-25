@@ -7,9 +7,10 @@ import {personalCall} from '../personal-discord.mjs';
 import {discordCall} from '../discord-suite.mjs';
 const OWNER='481485837801095178', CHANNEL='1520114348079583263', BOT='1515908078913192026';
 const ctx={me:{id:OWNER,membership:{member:true}}};
-const env={BUSHIN_OWNER_DISCORD_ID:OWNER,DISCORD_USER_TOKEN:'test-placeholder-credential-never-real-123456',
+const globalEnv={BUSHIN_OWNER_DISCORD_ID:OWNER,DISCORD_USER_TOKEN:'test-placeholder-credential-never-real-123456',
   PUBLIC_BASE_URL:'https://example.test',DB:{prepare(){throw Error('unexpected DB access');}},
   DISCORD_CLIENT_SECRET:'test',ENCRYPTION_KEY_BASE64:'test'};
+const env=globalEnv;
 const v2={id:'1563527726369865781',channel_id:CHANNEL,author:{id:BOT,username:'Naruto Bot',bot:true},
   timestamp:'2026-10-24T12:20:58.907000+00:00',content:'',embeds:[],flags:32768,
   components:[{type:17,components:[{type:9,components:[{type:10,content:'Missões disponíveis'}],accessory:{type:2,label:'Ver',custom_id:'missions',disabled:true}},
@@ -86,6 +87,7 @@ test('MCP catalogue is static, unique, and tool schemas are objects',()=>{
  assert.match(send.description,/Confira mode/);
 });
 test('history cursor advances to older messages and stops on an empty page',async t=>{
+ const env={...globalEnv,DISCORD_USER_TOKEN:'history-only-test-credential-placeholder-123456789'};
  const urls=[];t.mock.method(globalThis,'fetch',async u=>{
   urls.push(u);return Response.json(u.endsWith('/users/@me')?{id:OWNER}:u.endsWith('/channels/'+CHANNEL)?{guild_id:'1515877468299595919'}:u.includes('&before=')?[]:[v2]);
  });

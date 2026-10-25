@@ -16,6 +16,15 @@ import {visualRunner,visualMobile,visualTakeover} from "./visual-bridge.mjs";
 import {discordCall,officialBotDmReady,officialBotIdentity} from "./discord-suite.mjs";
 import {NARUTO_TOOLS,NARUTO_TOOL_NAMES,narutoCall} from "./naruto-rpg.mjs";
 import {PERSONAL_TOOLS,PERSONAL_NAMES,personalCall} from "./personal-discord.mjs";
+import {personalForumThreads} from "./personal-discord.mjs";
+import {personalListChannels} from "./personal-discord.mjs";
+import {personalInspectCommand,personalInvokeProfileProbe} from "./personal-discord.mjs";
+import {PANEL_HTML,PANEL_JS} from "./discord2-ui.mjs";
+import {agentRoute,recordCommandEvidence} from "./rpg-agent.mjs";
+import {normalizeMessage} from "./message-normalizer.mjs";
+import {bushinAiNext} from "./discord2-ai.mjs";
+import {bushinAutoRp} from "./discord2-autorp.mjs";
+import {searchHenriqueMessages,scanRpgChannels} from "./discord2-research.mjs";
 const DISCORD_CLIENT_ID="1561589128108314636";
 const NARUTO_GUILD_ID="1515877468299595919";
 const SCOPES=["identify","guilds","guilds.members.read"];
@@ -193,7 +202,7 @@ async function discordToken(env,data){
   return {access:j.access_token,refresh:j.refresh_token,expires:now()+j.expires_in*1000,scope:j.scope};
 }
 async function discordFetch(token,path){
-  if(!["/users/@me","/users/@me/guilds/"+NARUTO_GUILD_ID+"/member"].includes(path))
+  if(!["/users/@me","/users/@me/guilds","/users/@me/guilds/"+NARUTO_GUILD_ID+"/member"].includes(path))
     throw Error("Unapproved Discord API endpoint");
   const res=await fetch(DISCORD+path,{headers:{
     authorization:"Bearer "+token,accept:"application/json"
@@ -381,7 +390,11 @@ async function mcp(req,env){
     if(!activeTools.some(t=>t.name===name))return rpcError(id,-32601,"Unknown tool");
     let me;
     try{
-      me=await verified(env,auth.creds);
+      // Local diagnostics use the already validated, unexpired owner OAuth session.
+      // Browser dispatch retains owner-session checks, argument validation and owner-scoped D1 queues.
+      me=["bushin_browser_status","bushin_browser_result","bushin_browser_action","bushin_browser_tabs"].includes(name)
+        ? {id:auth.record.user_id}
+        : await verified(env,auth.creds);
       let data=name==="bushin_discord_profile"?discordProfileData(me):
         name==="bushin_session_status"?{
           state:"connected",mcp_oauth_authenticated:true,
@@ -410,6 +423,12 @@ async function mcp(req,env){
       }
       return rpc(id,{content:[{type:"text",text:JSON.stringify(data)}],structuredContent:data});
     }catch(e){
+      // A revoked upstream OAuth grant must trigger client reauthorization,
+      // rather than being disguised as an ordinary failed tool invocation.
+      if(e.status===401&&e.errorCode==="invalid_grant")return reply({error:"invalid_token",error_description:"Discord authorization expired."},401,{
+        "www-authenticate":'Bearer error="invalid_token", resource_metadata="'+base(env)+'/.well-known/oauth-protected-resource"',
+        "cache-control":"no-store"
+      });
       if(ADVANCED_NAMES.has(name)&&me?.id)await logToolAction(env,{me},name,"failed").catch(()=>{});
       return rpc(id,{isError:true,content:[{type:"text",text:e.message||"Discord check failed"}]});
     }
@@ -459,7 +478,7 @@ async function mobileHome(req,env){
    if(row?.user_id===env.BUSHIN_OWNER_DISCORD_ID){
      try{const c=await unseal(row.creds_encrypted,env);if(c.expires>now()+30000){
        const me=await verified(env,c);
-       return mPage("Discord conectado",'<p class="ok">✓ Conta verificada</p><div class="user">'+mEsc(me.display_name)+'</div><p>@'+mEsc(me.username)+'</p><p class="ok">✓ Membro do Naruto Project RP</p><a class="button" href="/mobile/dm">DM de teste do Bushin</a><a class="button" href="/mobile/visual">Controle visual do navegador</a><a class="button" href="/mobile/workspace">Tarefas e memória — usar agora</a><a class="button" href="/mobile/servers">Meus servidores Discord</a><a class="button" href="/mobile/features">Ver ferramentas do Bushin</a><a class="button" href="/mobile/commands">Autorizar comandos pessoais do Bushin</a><p class="muted">OAuth applications.commands: instalar o aplicativo na sua conta, sem permissao de administrador do servidor. Nao permite ler mensagens nem enviar como sua conta. O Discord precisa oferecer instalacao por usuario e o Bushin precisa registrar os comandos.</p><form method="post" action="/mobile/logout"><button class="button" type="submit">Desconectar</button></form>');
+       return mPage("Discord conectado",'<p class="ok">✓ Conta verificada</p><div class="user">'+mEsc(me.display_name)+'</div><p>@'+mEsc(me.username)+'</p><p class="ok">✓ Membro do Naruto Project RP</p><a class="button" href="/mobile/dm">DM de teste do Bushin</a><a class="button" href="/mobile/visual">Controle visual do navegador</a><a class="button" href="/mobile/workspace">Tarefas e memória — usar agora</a><a class="button" href="/mobile/discord2">🍥 Abrir Discord 2 — painel conectado</a><a class="button" href="/mobile/servers">Meus servidores Discord</a><a class="button" href="/mobile/features">Ver ferramentas do Bushin</a><a class="button" href="/mobile/commands">Autorizar comandos pessoais do Bushin</a><p class="muted">OAuth applications.commands: instalar o aplicativo na sua conta, sem permissao de administrador do servidor. Nao permite ler mensagens nem enviar como sua conta. O Discord precisa oferecer instalacao por usuario e o Bushin precisa registrar os comandos.</p><form method="post" action="/mobile/logout"><button class="button" type="submit">Desconectar</button></form>');
      }}catch{}
    }
  }
@@ -673,6 +692,26 @@ async function mobileDm(req,env){
    '<p class="muted">O Discord pode recusar DMs de bots se eles não compartilharem servidor ou se o usuário bloquear DMs. Nenhum envio é feito ao abrir esta página.</p>'+
    '<a class="button" href="/mobile/features">Voltar às ferramentas</a>');
 }
+export async function inspectCommandAuthorization(env,row){
+ const baseStatus={application_id:DISCORD_CLIENT_ID,application_matches:false,
+   naruto_executor_authorized:false,installation_verified:false,
+   executor_status:"not_connected",consent_url:null};
+ if(!row||row.user_id!==env.BUSHIN_OWNER_DISCORD_ID)return {...baseStatus,state:"unauthorized",reason:"Conta Henrique não verificada."};
+ try{
+   const credentials=await unseal(row.creds_encrypted,env);
+   if(credentials.expires<=now()+30000)return {...baseStatus,state:"expired",reason:"O login Discord expirou. Reconecte pela página da conta."};
+   const response=await fetch(DISCORD+"/oauth2/@me",{
+     headers:{authorization:"Bearer "+credentials.access,accept:"application/json"},signal:AbortSignal.timeout(10000)});
+   if(!response.ok)return {...baseStatus,state:response.status===401?"expired":"unavailable",
+     reason:response.status===401?"Discord recusou a sessão OAuth. Reconecte pela página da conta.":"Discord não confirmou a autorização (HTTP "+response.status+")."};
+   const info=await response.json();
+   if(info?.user?.id!==row.user_id||String(info?.application?.id||"")!==DISCORD_CLIENT_ID)
+     return {...baseStatus,state:"identity_mismatch",reason:"A conta ou o aplicativo retornado pelo Discord difere do Bushin autorizado."};
+   return {...baseStatus,state:"identity_verified",application_matches:true,
+     consent_url:personalCommandsConsentUrl(),
+     reason:"Discord confirmou Henrique e o aplicativo Bushin. A instalação de comandos é uma autorização separada; o executor Naruto ainda não está conectado."};
+ }catch{return {...baseStatus,state:"unavailable",reason:"Não foi possível conferir a autorização com o Discord."};}
+}
 async function mobilePersonalCommands(req,env){
  // Provide a precise, owner-only diagnostic BEFORE redirecting to an
  // installation flow which may say "Unknown Application". This does not
@@ -680,33 +719,11 @@ async function mobilePersonalCommands(req,env){
  const row=await mobileSessionOwner(req,env);
  if(!row)return mGo("/mobile");
  const portal="https://discord.com/developers/applications/"+DISCORD_CLIENT_ID+"/installation";
- let status="Não foi possível verificar o aplicativo usando esta sessão OAuth.";
- let appMatches=false;
- try{
-   const credentials=await unseal(row.creds_encrypted,env);
-   if(credentials.expires>now()+30000){
-     const result=await fetch(DISCORD+"/oauth2/@me",{
-       headers:{authorization:"Bearer "+credentials.access,accept:"application/json"},
-       signal:AbortSignal.timeout(10000)
-     });
-     if(result.ok){
-       const info=await result.json();
-       const appId=String(info?.application?.id||"");
-       if(info?.user?.id===row.user_id&&/^\d{15,22}$/.test(appId)){
-         appMatches=appId===DISCORD_CLIENT_ID;
-         status=appMatches?
-           "O Discord confirmou que seu login pertence ao aplicativo "+String(info.application.name||"Bushin").slice(0,70)+" (ID "+appId+").":
-           "ATENÇÃO: o OAuth conectado pertence ao aplicativo "+appId+", mas o link tenta usar "+DISCORD_CLIENT_ID+".";
-       }else{
-         status="O Discord não confirmou o ID do aplicativo associado a este login.";
-       }
-     }else if(result.status===401){
-       status="Sua autorização OAuth expirou; consulte a página principal antes de tentar novamente.";
-     }
-   }
- }catch{}
+ const auth=await inspectCommandAuthorization(env,row);
+ const appMatches=auth.application_matches===true;
+ const status=auth.reason;
  const guide='<p>'+mEsc(status)+'</p>'+
-   '<p>O Discord mostrou <strong>Aplicativo desconhecido</strong>. Antes de tentar novamente, confira:</p>'+
+   '<p>Esta autorização instala os comandos do Bushin na sua conta. Ela não concede ao site execução dos comandos ou botões do Naruto Bot.</p><p>Confira a configuração do aplicativo:</p>'+
    '<ol style="line-height:1.75;padding-left:22px">'+
    '<li>No Discord Developer Portal → <strong>General Information</strong>, confirme o <strong>Application ID '+mEsc(DISCORD_CLIENT_ID)+'</strong>.</li>'+
    '<li>Em <strong>Installation → Installation Contexts</strong>, habilite <strong>User Install</strong>.</li>'+
@@ -722,6 +739,8 @@ async function mobilePersonalCommands(req,env){
 async function mobilePersonalCommandsStart(req,env){
  const row=await mobileSessionOwner(req,env);
  if(!row)return mGo("/mobile");
+ const auth=await inspectCommandAuthorization(env,row);
+ if(!auth.application_matches)return mPage("Autorização não confirmada",'<p>'+mEsc(auth.reason)+'</p><a class="button" href="/mobile">Conferir minha conexão</a>');
  return mGo(personalCommandsConsentUrl());
 }
 async function mobileStart(req,env){
@@ -771,12 +790,242 @@ async function mobileLogout(req,env){
  return mGo("/mobile",[mSet(M_SESSION,"",0)]);
 }
 
+
+async function receivePrivateCommandResult(req,env){
+ let stage="method";
+ const fail=(status)=>reply({saved:false,stage},status,{"cache-control":"no-store"});
+ if(req.method!=="POST")return fail(405);
+ try{
+  stage="identity";
+  const token=(req.headers.get("authorization")||"").replace(/^Bearer /,"");
+  if(token.length>16000)return fail(401);
+  const parts=token.split(".");if(parts.length!==3)return fail(401);
+  const header=JSON.parse(dec.decode(bytesFrom64(parts[0]))),claims=JSON.parse(dec.decode(bytesFrom64(parts[1])));
+  const current=Math.floor(Date.now()/1000),repo="hp0592553-cyber/naruto-rpg-ia";
+  const diagnostic=claims.workflow_ref===repo+"/.github/workflows/discord2-relay-check.yml@refs/heads/Projeto";
+  if(header.alg!=="RS256"||claims.iss!=="https://token.actions.githubusercontent.com"||
+     claims.aud!==base(env)+"/internal/discord2-result"||claims.repository!==repo||
+     String(claims.repository_id)!=="1429981222"||String(claims.repository_owner_id)!=="259182200"||
+     claims.ref!=="refs/heads/Projeto"||(diagnostic?claims.event_name!=="push":claims.event_name!=="workflow_dispatch")||
+     (!diagnostic&&claims.workflow_ref!==repo+"/.github/workflows/opencode-projeto.yml@refs/heads/Projeto")||
+     !Number.isFinite(claims.exp)||claims.exp<=current||claims.nbf>current+30||
+     !Number.isFinite(claims.iat)||claims.iat<current-900||claims.iat>current+30)return fail(401);
+  stage="signing_keys";
+  const jwks=await fetch("https://token.actions.githubusercontent.com/.well-known/jwks",{redirect:"manual",signal:AbortSignal.timeout(10000)});
+  if(!jwks.ok)return fail(503);
+  const jwk=(await jwks.json()).keys?.find(k=>k.kid===header.kid&&k.kty==="RSA");if(!jwk)return fail(401);
+  stage="signature";
+  const key=await crypto.subtle.importKey("jwk",jwk,{name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["verify"]);
+  if(!await crypto.subtle.verify("RSASSA-PKCS1-v1_5",key,bytesFrom64(parts[2]),enc.encode(parts[0]+"."+parts[1])))return fail(401);
+  stage="payload";
+  if(Number(req.headers.get("content-length")||0)>180000)return fail(413);
+  const raw=await req.text();if(raw.length>180000)return fail(413);const data=JSON.parse(raw);
+  if(data.probe===true){
+   stage="encrypted_storage";
+   const encrypted=await seal({probe:true},env);
+   if(!(await unseal(encrypted,env)).probe)return fail(500);
+   const healthOwner=String(env.BUSHIN_OWNER_DISCORD_ID);
+   await env.DB.prepare("INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at").bind(healthOwner,"discord2_relay_health",JSON.stringify({sealed:encrypted}),Date.now()).run();
+   const health=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(healthOwner,"discord2_relay_health").first();
+   if(!health||!(await unseal(JSON.parse(health.value_json).sealed,env)).probe)return fail(500);
+   stage="run_access";
+   const check=await fetch("https://api.github.com/repos/"+repo+"/actions/runs/"+encodeURIComponent(claims.run_id),{redirect:"manual",signal:AbortSignal.timeout(10000),headers:{Authorization:"Bearer "+env.BUSHIN_GITHUB_TOKEN,Accept:"application/vnd.github+json","User-Agent":"Bushin-Result"}});
+   if(!check.ok)return fail(503);
+   return reply({saved:false,probe:true,stage:"ready",storage_verified:true},200,{"cache-control":"no-store"});
+  }
+  if(diagnostic)return fail(403);
+  if(!/^[a-f0-9-]{36}$/.test(data.request_id||""))return fail(400);
+  stage="request_correlation";
+  const owner=String(env.BUSHIN_OWNER_DISCORD_ID),stateRow=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(owner,"bushin_opencode_runner_v1").first();
+  const st=stateRow?JSON.parse(stateRow.value_json):null;
+  if(!st||st.request_id!==data.request_id||Date.now()-st.at>600000)return fail(409);
+  stage="workflow_correlation";
+  const run=await fetch("https://api.github.com/repos/"+repo+"/actions/runs/"+encodeURIComponent(claims.run_id),{redirect:"manual",signal:AbortSignal.timeout(10000),headers:{Authorization:"Bearer "+env.BUSHIN_GITHUB_TOKEN,Accept:"application/vnd.github+json","User-Agent":"Bushin-Result"}});
+  if(!run.ok)return fail(503);const record=await run.json();
+  if(record.display_title!=="Discord 2 "+st.request_id||record.head_branch!=="Projeto"||record.event!=="workflow_dispatch")return fail(403);
+  stage="response_validation";
+  const m=data.response;
+  if(!m||m.channel_id!==st.channel_id||m.author_id!=="1515908078913192026"||!/^[0-9]{15,22}$/.test(m.message_id||"")||
+     !/^[0-9]{15,22}$/.test(m.channel_id||"")||!Array.isArray(m.embeds)||!Array.isArray(m.components))return fail(400);
+  stage="encrypted_storage";
+  const normalized=normalizeMessage({...m,id:m.message_id,author:{id:m.author_id,username:"Naruto Bot",bot:true},flags:m.flags??(m.ephemeral?64:0)});
+  const result={response:{...normalized,message_id:normalized.id},command:st.command,target_user_id:st.options?.usuario||owner,run_id:String(claims.run_id),received_at:Date.now()};
+  await env.DB.prepare("INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO NOTHING")
+   .bind(owner,"discord2-private:"+st.request_id,JSON.stringify({sealed:await seal(result,env)}),Date.now()).run();
+  let tracking_saved=true;try{await recordCommandEvidence(env,owner,st,m)}catch{tracking_saved=false}
+  return reply({saved:true,tracking_saved},200,{"cache-control":"no-store"});
+ }catch{return fail(400)}
+}
+
 export default {
   async fetch(req,env){
     const path=new URL(req.url).pathname;
     try{
       const b=base(env);
       if(new URL(req.url).origin!==b)return reply({error:"Unrecognized host"},403);
+      if(path==="/internal/discord2-result")return receivePrivateCommandResult(req,env);
+      if(path==="/mobile/discord2"&&req.method==="GET"){
+        const row=await mobileSessionOwner(req,env);
+        if(!row)return mGo("/mobile");
+        return new Response(PANEL_HTML,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://media.tenor.com https://c.tenor.com https://*.giphy.com; media-src https://cdn.discordapp.com https://media.discordapp.net https://media.tenor.com https://c.tenor.com https://*.giphy.com; frame-ancestors 'none'; base-uri 'none'","x-content-type-options":"nosniff"}});
+      }
+      if(path==="/mobile/discord2/app.js"&&req.method==="GET"){
+        const row=await mobileSessionOwner(req,env);
+        if(!row)return reply({error:"login_required"},401);
+        return new Response(PANEL_JS,{headers:{"content-type":"text/javascript; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"}});
+      }
+      if(path.startsWith("/mobile/discord2/api/")){
+        const row=await mobileSessionOwner(req,env);
+        if(!row)return reply({state:"unauthorized",error:"Faça login no Bushin em /mobile"},401,{"cache-control":"no-store"});
+        const ctx={me:{id:row.user_id,membership:{guild_id:NARUTO_GUILD_ID,member:true}}},headers={"cache-control":"no-store","x-content-type-options":"nosniff"};
+        if(path==="/mobile/discord2/api/channels"&&req.method==="GET"){
+          const auth=await unseal(row.creds_encrypted,env);
+          if(auth.expires<=now()+30000)return reply({state:"unauthorized",error:"Login Discord expirado. Entre novamente pelo Bushin."},401,headers);
+          const [member,guilds]=await Promise.all([
+            discordFetch(auth.access,"/users/@me/guilds/"+NARUTO_GUILD_ID+"/member"),
+            discordFetch(auth.access,"/users/@me/guilds")
+          ]);
+          const guild=Array.isArray(guilds)?guilds.find(g=>String(g.id)===NARUTO_GUILD_ID):null;
+          const basePermissions=guild?.permissions??guild?.permissions_new;
+          if(!member||!Array.isArray(member.roles)||!/^[0-9]+$/.test(String(basePermissions??"")))
+            return reply({state:"unavailable",error:"Não consegui verificar cargos e permissões. Não vou exibir canais sem verificação."},503,headers);
+          const r=await personalListChannels(env,{...ctx,channelVisibility:{
+            memberId:row.user_id,roles:member.roles,basePermissions:String(basePermissions)
+          }});
+          return reply(r,r.listed?200:503,headers);
+        }
+        const forumPostRoute=path.match(/^\/mobile\/discord2\/api\/forum\/([0-9]{15,22})\/posts$/);
+        if(forumPostRoute&&req.method==="GET"){
+          const cursor=new URL(req.url).searchParams.get("before")||null;
+          const result=await personalForumThreads(env,forumPostRoute[1],ctx,cursor);
+          return reply(result,result.listed?200:503,headers);
+        }
+        if(path==="/mobile/discord2/api/command-auth"&&req.method==="GET"){
+          const auth=await inspectCommandAuthorization(env,row);
+          return reply(auth,auth.application_matches?200:auth.state==="expired"?401:503,headers);
+        }
+        if(path==="/mobile/discord2/api/commands"&&req.method==="GET"){
+          const inspected=await personalInspectCommand(env,{command:"/perfil ver",channel_id:new URL(req.url).searchParams.get("channel_id")||"1520114348079583263"},ctx);
+          return reply(inspected,inspected.catalog_verified===true?200:inspected.code===429?429:503,{...headers,...(inspected.retry_after_seconds?{"retry-after":String(inspected.retry_after_seconds)}:{})});
+        }
+        if(path==="/mobile/discord2/api/search/mine"&&req.method==="POST")return await searchHenriqueMessages(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
+        if(path==="/mobile/discord2/api/ai/scan"&&req.method==="POST")return await scanRpgChannels(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
+        if(path==="/mobile/discord2/api/agent")return agentRoute(req,env,ctx,{reply,baseUrl:base(env),plan:async channel_id=>{
+          const result=await bushinAiNext(new Request(base(env)+"/mobile/discord2/api/ai/next",{method:"POST",headers:{origin:base(env),"content-type":"application/json"},body:JSON.stringify({channel_id,autoplay:false,question:"Analise minha ficha e missão confirmadas e proponha um próximo passo válido. Apenas planejar."})}),env,ctx,{reply,personalCall,baseUrl:base(env)});
+          const data=await result.json();return result.ok?{ok:true,plan:{analysis:data.analysis,next_step:data.next_step,model:data.model}}:{ok:false,error:data.error};
+        }});
+        if(path==="/mobile/discord2/api/ai/next"&&req.method==="POST")return await bushinAiNext(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
+        if(path==="/mobile/discord2/api/ai/autorp")return await bushinAutoRp(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
+
+        if(path==="/mobile/discord2/api/ai/opencode"){
+          const HEAD={"cache-control":"no-store","x-content-type-options":"nosniff"};
+          const owner=String(ctx.me?.id||"");
+          const REPO="hp0592553-cyber/naruto-rpg-ia",KEY="bushin_opencode_runner_v1",WF="opencode-projeto.yml";
+          if(owner!==String(env.BUSHIN_OWNER_DISCORD_ID||"")||ctx.me?.membership?.member!==true)return reply({error:"A conta autorizada do Henrique é necessária."},403,HEAD);
+          if(typeof env.BUSHIN_GITHUB_TOKEN!=="string"||env.BUSHIN_GITHUB_TOKEN.length<20)return reply({error:"Token GitHub do Worker não configurado."},503,HEAD);
+          const requestGitHub=async (route,method="GET",payload=null)=>{
+            const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),12000);
+            try{
+              const response=await fetch("https://api.github.com/repos/"+REPO+route,{method,redirect:"manual",signal:ctrl.signal,headers:{
+                Authorization:"Bearer "+env.BUSHIN_GITHUB_TOKEN,Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28","User-Agent":"Bushin-Naruto-Agent",
+                ...(payload?{"Content-Type":"application/json"}:{})},...(payload?{body:JSON.stringify(payload)}:{})});
+              if(response.status===204||response.status===202)return {ok:true,status:response.status,data:null};
+              if(!response.ok)return {ok:false,error:"GitHub retornou HTTP "+response.status,status:response.status};
+              return {ok:true,data:await response.json(),status:response.status};
+            }catch{return {ok:false,error:ctrl.signal.aborted?"GitHub Actions não respondeu em 12 segundos. Nenhuma repetição automática.":"Falha de transporte ao consultar GitHub Actions. Nenhuma repetição automática.",status:503}}finally{clearTimeout(timeout)}
+          };
+          const getState=async()=>{try{const r=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(owner,KEY).first();return r?JSON.parse(r.value_json):null}catch{return null}};
+          const save=async(value,minAge=0)=>{
+            const now=Date.now(),result=await env.DB.prepare(
+              "INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at WHERE bushin_project_state.updated_at < ?")
+            .bind(owner,KEY,JSON.stringify(value),now,now-minAge).run();return Number(result.meta?.changes||0)===1;
+          };
+          const getRuns=()=>requestGitHub("/actions/workflows/"+WF+"/runs?branch=Projeto&event=workflow_dispatch&per_page=15");
+          const candidate=(runs,st)=>runs.filter(r=>(!st.request_id||r.display_title==="Discord 2 "+st.request_id)&&r.head_branch==="Projeto"&&Number(r.run_number||0)>Number(st.baseline||0)&&Date.parse(r.created_at||"")>=Number(st.at||0)-15000).sort((a,b)=>Number(a.run_number)-Number(b.run_number))[0]||null;
+          const publicRun=r=>r?{id:String(r.id),url:"https://github.com/"+REPO+"/actions/runs/"+r.id,status:String(r.status||"unknown"),conclusion:String(r.conclusion||""),run_number:Number(r.run_number||0)}:null;
+          if(req.method==="GET"){
+            const st=await getState();
+            if(!st)return reply({state:"idle",executed:false,confirmed:false,note:"Nenhuma execução solicitada."},200,HEAD);
+            let captured=null;
+            if(st?.request_id){try{
+             const saved=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(owner,"discord2-private:"+st.request_id).first();
+             if(saved)captured=await unseal(JSON.parse(saved.value_json).sealed,env);
+            }catch{}}
+            if(captured)return reply({state:"finished",command:st.command,requested_at:st.at,executed:true,confirmed:true,response:captured.response,note:"Resposta do Naruto Bot recebida e disponível no painel."},200,HEAD);
+            const runs=await getRuns();if(!runs.ok)return reply({state:"unavailable",error:runs.error,upstream_status:runs.status,requested_at:st?.at,executed:false,confirmed:false},503,HEAD);
+            const r=candidate(runs.data?.workflow_runs||[],st);
+            if(!r)return reply({state:st.phase||"requested",requested_at:st.at,run:null,executed:false,confirmed:false,note:"GitHub pode demorar a listar um workflow recém-solicitado."},200,HEAD);
+            return reply({state:r.status==="completed"?"finished":r.status,run:publicRun(r),requested_at:st.at,command:st.command,executed:st.mode==="comando"&&r.conclusion==="success",confirmed:false,response_captured_by_executor:st.mode==="comando"&&r.conclusion==="success",response_delivered:false,
+              note:st.mode==="comando"&&r.status==="completed"?(r.conclusion==="success"?"O executor capturou uma resposta, mas a entrega da caixa ao painel não foi confirmada. Consulte novamente, sem repetir o comando.":"Execução sem resposta comprovada. Consulte o registro do executor; não reenvie automaticamente."):r.status==="completed"?"Workflow finalizado. Confira o artefato naruto-jogada-tentativa para confirmar ação e resposta, não somente a conclusão do GitHub.":"Workflow "+String(r.status)+"; nenhuma jogada comprovada ainda."},200,HEAD);
+          }
+          if(req.method!=="POST")return reply({error:"Método não permitido"},405,HEAD);
+          if(req.headers.get("origin")!==base(env))return reply({error:"Origem inválida"},403,HEAD);
+          if(!(req.headers.get("content-type")||"").startsWith("application/json"))return reply({error:"Formato inválido"},415,HEAD);
+          const raw=await req.text();if(raw.length>12000)return reply({error:"Pedido longo demais"},413,HEAD);
+          let data;try{data=JSON.parse(raw)}catch{return reply({error:"JSON inválido"},400,HEAD)}
+          if(!["start","stop"].includes(data?.action))return reply({error:"Ação inválida"},400,HEAD);
+          const commandRequest=data.command_request;
+          if(commandRequest!==undefined&&(!commandRequest||typeof commandRequest.command!=="string"||commandRequest.command.length>100||!/^\/?[\p{L}\p{N}_-]+(?: [\p{L}\p{N}_-]+){0,2}$/u.test(commandRequest.command)||!/^\d{15,22}$/.test(commandRequest.channel_id)||!commandRequest.options||Array.isArray(commandRequest.options)||typeof commandRequest.options!=="object"||Object.keys(commandRequest.options).length>25||Object.values(commandRequest.options).some(v=>!["string","number","boolean"].includes(typeof v))))return reply({error:"Comando ou parâmetros inválidos."},400,HEAD);
+          const st=await getState();
+          if(data.action==="start"){
+            if(!commandRequest&&st&&Date.now()-Number(st.at||0)<600000)return reply({state:"cooldown",error:"Já foi solicitada uma tentativa nos últimos 10 minutos. Consulte o estado para não repetir."},409,HEAD);
+            const runs=await getRuns();if(!runs.ok)return reply({error:runs.error},503,HEAD);
+            const rows=runs.data?.workflow_runs||[];
+            if(rows.some(r=>r.head_branch==="Projeto"&&["queued","in_progress","waiting","requested"].includes(r.status)))
+              return reply({state:"busy",error:"Já há uma execução OpenCode em andamento. Não vou duplicá-la."},409,HEAD);
+            const now=Date.now(),baseline=Math.max(0,...rows.map(r=>Number(r.run_number||0)));
+            const reservation={at:now,baseline,phase:"dispatching",stopped:false,request_id:commandRequest?crypto.randomUUID():null,mode:commandRequest?"comando":"jogar",channel_id:commandRequest?.channel_id||null,options:commandRequest?.options||{},command:commandRequest?.command||"/missoes minhas"};
+            try{if(!(await save(reservation,commandRequest?30000:600000)))return reply({state:"busy",error:"Outra tentativa já foi reservada."},409,HEAD)}catch{return reply({error:"Falha ao reservar tentativa no banco de dados."},503,HEAD)}
+            const sent=await requestGitHub("/actions/workflows/"+WF+"/dispatches","POST",{ref:"Projeto",inputs:commandRequest?{mode:"comando",request_id:reservation.request_id,command_json:JSON.stringify(commandRequest)}:{mode:"jogar"}});
+            if(!sent.ok){await save({...reservation,phase:"failed",reason:sent.error}).catch(()=>{});return reply({state:"unavailable",error:sent.error,submitted:false},503,HEAD)}
+            await save({...reservation,phase:"requested"}).catch(()=>{});
+            return reply({state:"requested",submitted:true,executed:false,confirmed:false,command:reservation.command,
+             note:"Executor solicitado para "+reservation.command+". Aguarde a confirmação; não repita o envio."},200,HEAD);
+          }
+          if(!st)return reply({state:"stopped",reason:"Nenhuma execução anterior."},200,HEAD);
+          const runs=await getRuns();if(!runs.ok)return reply({state:"unavailable",error:runs.error},503,HEAD);
+          const r=candidate(runs.data?.workflow_runs||[],st);
+          if(r&&["queued","in_progress","waiting","requested"].includes(r.status)){
+            const cancel=await requestGitHub("/actions/runs/"+r.id+"/cancel","POST");
+            await save({...st,stopped:true,phase:cancel.ok?"cancel_requested":"cancel_failed"}).catch(()=>{});
+            return reply({state:cancel.ok?"cancel_requested":"unavailable",run:publicRun(r),stopped:cancel.ok,reason:cancel.ok?"GitHub recebeu o pedido de cancelamento.":cancel.error},cancel.ok?200:503,HEAD);
+          }
+          await save({...st,stopped:true,phase:"stop_requested"}).catch(()=>{});
+          return reply({state:"stop_requested",stopped:false,reason:"Nenhum workflow em execução foi identificado para cancelar."},200,HEAD);
+        }
+
+        if(path==="/mobile/discord2/api/ai/profile-probe"&&req.method==="POST"){
+          if(req.headers.get("origin")!==base(env))return reply({error:"Origem inválida"},403,headers);
+          if(!(req.headers.get("content-type")||"").startsWith("application/json"))return reply({error:"JSON inválido"},415,headers);
+          const result=await personalInvokeProfileProbe(env,ctx);
+          return reply(result,result.submitted===true?200:result.state==="unknown"?202:422,headers);
+        }
+        const m=path.match(/^\/mobile\/discord2\/api\/channels\/([0-9]{15,22})\/messages$/);
+        if(m){
+          const channel_id=m[1];
+          if(req.method==="GET"){
+            const u=new URL(req.url),before=u.searchParams.get("before")||undefined;
+            if(before&&!/^[0-9]{15,22}$/.test(before))return reply({error:"Cursor inválido"},400,headers);
+            const r=await personalCall(env,"bushin_naruto_personal_read",{channel_id,limit:12,...(before?{before}:{})},ctx);
+            return reply(r,r.read?200:503,headers);
+          }
+          if(req.method==="POST"){
+            if(req.headers.get("origin")!==base(env))return reply({error:"Origem inválida"},403,headers);
+            if(!(req.headers.get("content-type")||"").startsWith("application/json"))return reply({error:"Tipo inválido"},415,headers);
+            const raw=await req.text();
+            if(raw.length>1400)return reply({error:"Mensagem grande demais"},413,headers);
+            let data;try{data=JSON.parse(raw)}catch{return reply({error:"JSON inválido"},400,headers)}
+            if(data?.confirmed!==true||typeof data?.content!=="string")return reply({error:"Confirmação ausente"},400,headers);
+            const mentionIds=Array.isArray(data.mention_ids)?data.mention_ids:[];
+            if(mentionIds.length>5||!mentionIds.every(id=>/^[0-9]{15,22}$/.test(String(id))&&data.content.includes("<@"+id+">")))return reply({error:"Marcações inválidas"},400,headers);
+            const replyId=data.reply_to===undefined?null:String(data.reply_to);
+            if(replyId!==null&&!/^[0-9]{15,22}$/.test(replyId))return reply({error:"Resposta inválida"},400,headers);
+            const r=await personalCall(env,"bushin_naruto_personal_send",{channel_id,text:data.content,confirmed:true,mention_ids:mentionIds,...(replyId?{reply_to:replyId}:{})},ctx);
+            return reply(r,r.sent?200:r.state==="unknown"?202:r.code===429?429:422,{...headers,...(r.retry_after_seconds?{"retry-after":String(r.retry_after_seconds)}:{})});
+          }
+        }
+        return reply({error:"Rota não encontrada"},404,headers);
+      }
       if((path==="/"||path==="/mobile")&&req.method==="GET")return await mobileHome(req,env);
       if(path==="/mobile/features"&&req.method==="GET")return await mobileFeatures(req,env);
       if(path==="/mobile/visual/takeover"&&req.method==="GET"){
@@ -830,3 +1079,4 @@ export default {
     }catch(e){return oauthReply(e);}
   }
 };
+
