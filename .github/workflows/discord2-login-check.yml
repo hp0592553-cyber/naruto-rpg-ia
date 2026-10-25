@@ -1,0 +1,41 @@
+name: Discord 2 - verificar login
+on:
+  push:
+    branches: [Projeto]
+    paths: [.github/workflows/discord2-login-check.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  login:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'mcp==1.30.0' 'discord.py-self==2.1.0'
+      - name: Verificar identidade e acesso sem enviar comando
+        env:
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+        run: |
+          python - <<'PY'
+          import asyncio, json, sys
+          sys.path.insert(0, 'scripts')
+          import naruto_guarded_mcp as executor
+          async def check():
+              try:
+                  result = await executor.status()
+                  safe = {k: result.get(k) for k in ('status', 'account_id', 'guild_accessed', 'channel_accessed', 'error_type', 'http_status')}
+                  print('DISCORD2_LOGIN_RESULT=' + json.dumps(safe))
+                  return result.get('status') == 'connected'
+              finally:
+                  await executor.client.close()
+                  if executor.connection:
+                      executor.connection.cancel()
+                      await asyncio.gather(executor.connection, return_exceptions=True)
+          sys.exit(0 if asyncio.run(check()) else 1)
+          PY
