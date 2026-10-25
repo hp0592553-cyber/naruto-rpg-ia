@@ -39,7 +39,10 @@ export function normalizeMessage(message, {channelId = null, depth = 0} = {}) {
     for(const key of ["media","file"]) if(c[key])out[key]=media(c[key]);
     if(c.emoji)out.emoji={id:snowflake(c.emoji.id),name:str(c.emoji.name,80)};
     if (Array.isArray(c.options))out.options=list(c.options,25).map(o=>({label:str(o.label,100),value:str(o.value,100),description:str(o.description,100),default:o.default===true}));
-    if ([2,3,5,6,7,8].includes(c.type))controls.push({type:c.type,label:str(c.label||c.placeholder,200),custom_id:str(c.custom_id,100),disabled:c.disabled===true,url:url(c.url)});
+    if ([2,3,5,6,7,8].includes(c.type))controls.push({type:c.type,label:str(c.label||c.placeholder,200),custom_id:str(c.custom_id,100),disabled:c.disabled===true,url:url(c.url),
+      ...(out.options?{options:out.options}:{}),
+      ...(Number.isInteger(c.min_values)?{min_values:c.min_values}:{}),
+      ...(Number.isInteger(c.max_values)?{max_values:c.max_values}:{})});
     if (Array.isArray(c.components))out.components=c.components.slice(0,40).map(x=>component(x,depth+1)).filter(Boolean);
     for(const key of ["accessory","component"])if(c[key])out[key]=component(c[key],depth+1);
     if(Array.isArray(c.items))out.items=list(c.items,10).map(i=>({media:media(i.media),description:str(i.description,1024),spoiler:i.spoiler===true}));

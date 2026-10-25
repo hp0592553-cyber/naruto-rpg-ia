@@ -93,3 +93,16 @@ Próximo critério verificável: executor autorizado disponível e sessão váli
 consulta real da ficha → resposta nova do Naruto Bot ligada a Henrique e à ação →
 parser de estado validado. Até isso ocorrer, status de workflow, análise da IA,
 HTTP aceito e testes simulados não contam como jogada concluída.
+
+## Continuação após reconexão
+
+OAuth voltou a connected e a leitura retornou 12 mensagens reais. As duas respostas
+de nível do Naruto Bot nesse lote pertencem a terceiros; nenhuma ficha de Henrique
+foi confirmada. O catálogo confirmou /perfil ver do Naruto Bot, mas a chamada
+retornou executor_status=not_connected, executed=false e sent=false.
+
+A IA agora recebe os identificadores dos controles, opções e valores de seleção,
+metadados da interação e indicação de mídia sem texto extraído. O observador
+informa quais mensagens estão correlacionadas ao dono. Não há execução automática
+nessa mudança. Os 28 testes locais passaram, incluindo a passagem desses dados
+pelo endpoint de IA; rede, modelo e D1 desse teste são simulados.
