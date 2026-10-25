@@ -5,6 +5,7 @@ import os
 import re
 import urllib.request
 import urllib.parse
+import urllib.error
 
 
 def publish_response(response):
@@ -14,7 +15,7 @@ def publish_response(response):
     with urllib.request.urlopen(request, timeout=15) as handle:
         oidc = json.load(handle)['value']
     payload = json.dumps({'request_id':os.environ['RPG_REQUEST_ID'],'response':response}).encode()
-    request = urllib.request.Request(endpoint, data=payload, headers={'Authorization':'Bearer ' + oidc,'Content-Type':'application/json'}, method='POST')
+    request = urllib.request.Request(endpoint, data=payload, headers={'Authorization':'Bearer ' + oidc,'Content-Type':'application/json','User-Agent':'Bushin-Discord2-Relay/1.0'}, method='POST')
     with urllib.request.urlopen(request, timeout=20) as handle:
         return json.load(handle).get('saved') is True
 
@@ -59,10 +60,20 @@ async def run(data):
     if result.get("command_completed") and result.get("response"):
         try:
             result["response_relayed"] = await asyncio.to_thread(publish_response, result["response"])
-        except Exception:
+        except urllib.error.HTTPError as exc:
             result["response_relayed"] = False
+            result["relay_http_status"] = exc.code
+            try:
+                stage = json.load(exc).get("stage")
+                if stage in {"method","identity","signing_keys","signature","payload","request_correlation","workflow_correlation","response_validation","encrypted_storage","run_access"}:
+                    result["relay_stage"] = stage
+            except Exception:
+                pass
+        except Exception as exc:
+            result["response_relayed"] = False
+            result["relay_error_type"] = type(exc).__name__
     # Do not print response bodies or raw exceptions into public workflow logs.
-    public = {k: result.get(k) for k in ('status', 'command_attempted', 'command_sent', 'command_completed', 'interaction_id', 'http_status', 'error_type', 'missing', 'response_relayed')}
+    public = {k: result.get(k) for k in ('status', 'command_attempted', 'command_sent', 'command_completed', 'interaction_id', 'http_status', 'error_type', 'missing', 'response_relayed', 'relay_http_status', 'relay_stage', 'relay_error_type')}
     print(json.dumps(public, ensure_ascii=False))
     return 0 if result.get('command_completed') is True else 1
 

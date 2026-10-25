@@ -2,7 +2,7 @@
  * Bushin workspace/GitHub adapter. A Cloudflare-scoped GitHub token is optional.
  * No Github token is sent to MCP callers, returned as an error, or added to logs.
  */
-const REPO="educacaomggovbr00-web/shinobi-ai-agent";
+const REPO="hp0592553-cyber/naruto-rpg-ia";
 const API="https://api.github.com/repos/"+REPO;
 const ready=env=>typeof env.BUSHIN_GITHUB_TOKEN==="string"&&env.BUSHIN_GITHUB_TOKEN.length>=20;
 const blocked=()=>({state:"unavailable",configured:false,reason:"Acesso GitHub do Worker indisponível: configure BUSHIN_GITHUB_TOKEN como Secret na Cloudflare. O plugin GitHub conectado ao chat é independente."});
@@ -65,7 +65,7 @@ export async function repoCall(env,name,args={},ctx={}){
    if(args.confirmed!==true)throw Error("Para iniciar o Linux temporário, confirme a ação.");
    const runs=await github(env,"/actions/workflows/bushin-discord-live.yml/runs?status=in_progress&per_page=10");
    const existing=(runs.workflow_runs||[]).find(x=>x.head_branch==="main"&&x.status==="in_progress");
-   if(existing)return {state:"already_running",run_id:String(existing.id),url:existing.html_url,login_required:"Confira o estado da sessão visual."};
+   if(existing&&Date.now()-Date.parse(existing.created_at||existing.run_started_at||0)<90*1000)return {state:"already_running",run_id:String(existing.id),url:existing.html_url,login_required:"Confira o estado da sessão visual."};
    await dispatch(env,"bushin-discord-live.yml");
    return {state:"requested",note:"Início solicitado ao GitHub Actions. Aguarde o workflow e faça login só na janela protegida do navegador. Nada foi conectado automaticamente.",url:"https://github.com/"+REPO+"/actions/workflows/bushin-discord-live.yml"};
  }

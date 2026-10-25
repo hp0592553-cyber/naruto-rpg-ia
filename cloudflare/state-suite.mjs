@@ -61,7 +61,7 @@ export async function stateCall(env,name,args={},ctx={}){
   note:"Use o botão Desconectar no portal autenticado. Esta ferramenta não revogou a sessão."};
  if(name==="permissions_check")return {state:"completed",capabilities:available(env),
    personal_discord_session:await personalIdentityCheck(env,ctx),
-   note:"Diagnóstico somente de leitura: valida identidade, canal e uma mensagem descartada; não envia mensagens. O catálogo do ChatGPT precisa ser comparado ao tools/list."};
+   note:"Identidade da Key validada no Discord sem ler/enviar mensagens; catálogo do ChatGPT pode estar desatualizado."};
  if(name==="audit_log"){
    const limit=Number.isInteger(args.limit)?Math.min(30,Math.max(1,args.limit)):15;
    const result=await db(env,"SELECT id,task_id,action,summary,created_at FROM bushin_events WHERE owner_id=? ORDER BY id DESC LIMIT ?",owner,limit).all();

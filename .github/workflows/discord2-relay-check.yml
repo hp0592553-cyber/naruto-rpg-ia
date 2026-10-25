@@ -25,8 +25,8 @@ jobs:
               with urllib.request.urlopen(request,timeout=25) as handle:
                   result=json.load(handle)
               stage=result.get('stage','unknown')
-              print(json.dumps({'relay_probe':stage,'discord_action_sent':False}))
-              raise SystemExit(0 if stage=='ready' else 1)
+              print(json.dumps({'relay_probe':stage,'storage_verified':result.get('storage_verified',False),'discord_action_sent':False}))
+              raise SystemExit(0 if stage=='ready' and result.get('storage_verified') is True else 1)
           except urllib.error.HTTPError as exc:
               body=exc.read(2048).decode('utf-8','replace')
               try: stage=json.loads(body).get('stage','unknown')
