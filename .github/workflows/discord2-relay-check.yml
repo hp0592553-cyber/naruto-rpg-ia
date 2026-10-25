@@ -15,12 +15,12 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
-          import os, json, urllib.request, urllib.parse, urllib.error
+          import os, json, re, urllib.request, urllib.parse, urllib.error
           endpoint='https://bushin-discord-direct.henrique-silva081106.workers.dev/internal/discord2-result'
           request=urllib.request.Request(os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']+'&audience='+urllib.parse.quote(endpoint,safe=''),headers={'Authorization':'Bearer '+os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
           with urllib.request.urlopen(request,timeout=15) as handle:
               token=json.load(handle)['value']
-          request=urllib.request.Request(endpoint,data=b'{"probe":true}',headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'},method='POST')
+          request=urllib.request.Request(endpoint,data=b'{"probe":true}',headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','User-Agent':'Bushin-Discord2-Relay/1.0'},method='POST')
           try:
               with urllib.request.urlopen(request,timeout=25) as handle:
                   result=json.load(handle)
@@ -28,8 +28,11 @@ jobs:
               print(json.dumps({'relay_probe':stage,'discord_action_sent':False}))
               raise SystemExit(0 if stage=='ready' else 1)
           except urllib.error.HTTPError as exc:
-              try: stage=json.load(exc).get('stage','unknown')
+              body=exc.read(2048).decode('utf-8','replace')
+              try: stage=json.loads(body).get('stage','unknown')
               except Exception: stage='http_response'
+              edge=re.search(r'error code:\s*(\d+)',body,re.I)
+              print(json.dumps({'response_type':exc.headers.get('Content-Type',''),'server':exc.headers.get('Server',''),'edge_code':int(edge.group(1)) if edge else None}))
               if stage not in {'method','identity','signing_keys','signature','payload','request_correlation','workflow_correlation','response_validation','encrypted_storage','run_access'}: stage='unknown'
               print(json.dumps({'relay_probe':stage,'http_status':exc.code,'discord_action_sent':False}))
               raise SystemExit(1)
