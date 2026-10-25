@@ -98,3 +98,65 @@ test('Discord 2 contains working pairing and status controls without ChatGPT cre
  assert.match(PANEL_JS,/ai\/codex-bridge/);
  assert.doesNotThrow(()=>new Function(PANEL_JS));
 });
+
+
+test('Chat in Discord 2 routes private RPG intent messages to updated Codex CLI only',async()=>{
+ const env={BUSHIN_OWNER_DISCORD_ID:owner,DB:fakeDb()};
+ const h={reply,baseUrl};
+ const pair=await codexBridgeMobile(mobile('POST',{action:'pair'}),env,ctx,h);
+ const {pair_code}=await pair.json();
+ const paired=await codexBridgeAgent(internal('pair','POST',{pair_code}),env,{reply});
+ const {agent_token}=await paired.json();
+ // The old echo-only Codespaces runner must not accidentally consume chat tasks.
+ let status=await codexBridgeMobile(mobile(),env,ctx,h);
+ assert.equal((await status.json()).chat_ready,false);
+ let unavailable=await codexBridgeMobile(mobile('POST',{action:'chat',intent:'ficha',question:'Qual meu nível?'}),env,ctx,h);
+ assert.equal(unavailable.status,409);
+ const hb=await codexBridgeAgent(internal('queue?capabilities=chat-v1','GET',null,agent_token),env,{reply});
+ assert.equal(hb.status,200);
+ status=await codexBridgeMobile(mobile(),env,ctx,h);
+ assert.equal((await status.json()).chat_ready,true);
+ const invalid=await codexBridgeMobile(mobile('POST',{action:'chat',intent:'hack',question:'faça isso'}),env,ctx,h);
+ assert.equal(invalid.status,400);
+ const created=await codexBridgeMobile(mobile('POST',{
+  action:'chat',intent:'ficha',question:'Qual meu nível de ninja?',
+  context:'Canal comandos. Naruto Bot: ficha indisponível.',
+ }),env,ctx,h);
+ assert.equal(created.status,202);
+ const jobId=(await created.json()).job_id;
+ let queued=await codexBridgeAgent(internal('queue','GET',null,agent_token),env,{reply});
+ assert.equal((await queued.json()).job,null,'legacy runner must not steal a chat task');
+ // New runner declares chat capability and can process the bounded read-only prompt.
+ queued=await codexBridgeAgent(internal('queue?capabilities=chat-v1','GET',null,agent_token),env,{reply});
+ const task=(await queued.json()).job;
+ assert.equal(task.id,jobId);assert.equal(task.kind,'chat');
+ assert.match(task.prompt,/BUSHIN_CODEX_CHAT_V1/);
+ assert.match(task.prompt,/Não faça|não use ferramentas|não execute comandos/i);
+ assert.match(task.prompt,/Ficha ainda não confirmada/);
+ assert.match(task.prompt,/Qual meu nível de ninja/);
+ const response=await codexBridgeAgent(internal('result','POST',{
+  id:jobId,success:true,output:'Seu nível ainda não foi confirmado; consulte sua ficha.',
+ },agent_token),env,{reply});
+ assert.equal(response.status,200);assert.equal((await response.json()).saved,true);
+ status=await codexBridgeMobile(mobile(),env,ctx,h);
+ const chat=await status.json();
+ assert.equal(chat.job.kind,'chat');assert.equal(chat.job.state,'completed');
+ assert.equal(chat.chat_history.length,2);assert.equal(chat.chat_history[0].role,'user');
+ assert.equal(chat.chat_history[1].role,'assistant');
+ assert.ok(!JSON.stringify(chat).includes(agent_token));
+ const cleared=await codexBridgeMobile(mobile('POST',{action:'clear_chat'}),env,ctx,h);
+ assert.equal(cleared.status,200);
+ status=await codexBridgeMobile(mobile(),env,ctx,h);
+ assert.equal((await status.json()).chat_history.length,0);
+});
+
+test('RPG intent controls are on the main chat, separate from Discord send',()=>{
+ assert.match(PANEL_HTML,/id="quickCodex"/);
+ assert.match(PANEL_HTML,/id="codexConversation"/);
+ assert.match(PANEL_HTML,/id="codexComposer"/);
+ assert.match(PANEL_HTML,/data-codex-intent="missoes"/);
+ assert.match(PANEL_HTML,/data-codex-intent="combate"/);
+ assert.match(PANEL_JS,/action:"chat",intent:codexIntent/);
+ assert.match(PANEL_JS,/renderCodexConversation/);
+ assert.doesNotThrow(()=>new Function(PANEL_JS));
+});
