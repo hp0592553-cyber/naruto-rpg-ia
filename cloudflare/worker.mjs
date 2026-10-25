@@ -836,7 +836,7 @@ export default {
         }
         if(path==="/mobile/discord2/api/commands"&&req.method==="GET"){
           const inspected=await personalInspectCommand(env,{command:"/perfil ver",channel_id:new URL(req.url).searchParams.get("channel_id")||"1520114348079583263"},ctx);
-          return reply(inspected,inspected.catalog_verified===true?200:503,headers);
+          return reply(inspected,inspected.catalog_verified===true?200:inspected.code===429?429:503,{...headers,...(inspected.retry_after_seconds?{"retry-after":String(inspected.retry_after_seconds)}:{})});
         }
         if(path==="/mobile/discord2/api/search/mine"&&req.method==="POST")return await searchHenriqueMessages(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/ai/scan"&&req.method==="POST")return await scanRpgChannels(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
@@ -852,7 +852,7 @@ export default {
           const requestGitHub=async (route,method="GET",payload=null)=>{
             const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),12000);
             try{
-              const response=await fetch("https://api.github.com/repos/"+REPO+route,{method,redirect:"error",signal:ctrl.signal,headers:{
+              const response=await fetch("https://api.github.com/repos/"+REPO+route,{method,redirect:"manual",signal:ctrl.signal,headers:{
                 Authorization:"Bearer "+env.BUSHIN_GITHUB_TOKEN,Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28","User-Agent":"Bushin-Naruto-Agent",
                 ...(payload?{"Content-Type":"application/json"}:{})},...(payload?{body:JSON.stringify(payload)}:{})});
               if(response.status===204||response.status===202)return {ok:true,status:response.status,data:null};
@@ -938,7 +938,7 @@ export default {
             const replyId=data.reply_to===undefined?null:String(data.reply_to);
             if(replyId!==null&&!/^[0-9]{15,22}$/.test(replyId))return reply({error:"Resposta inválida"},400,headers);
             const r=await personalCall(env,"bushin_naruto_personal_send",{channel_id,text:data.content,confirmed:true,mention_ids:mentionIds,...(replyId?{reply_to:replyId}:{})},ctx);
-            return reply(r,r.sent?200:r.state==="unknown"?202:422,headers);
+            return reply(r,r.sent?200:r.state==="unknown"?202:r.code===429?429:422,{...headers,...(r.retry_after_seconds?{"retry-after":String(r.retry_after_seconds)}:{})});
           }
         }
         return reply({error:"Rota não encontrada"},404,headers);
