@@ -156,7 +156,7 @@ test('RPG intent controls are on the main chat, separate from Discord send',()=>
  assert.match(PANEL_HTML,/id="codexComposer"/);
  assert.match(PANEL_HTML,/data-codex-intent="missoes"/);
  assert.match(PANEL_HTML,/data-codex-intent="combate"/);
- assert.match(PANEL_JS,/action:"chat",intent:codexIntent/);
+ assert.match(PANEL_JS,/action:mode==="cli"\?"chat":"cloud_chat"/);
  assert.match(PANEL_JS,/renderCodexConversation/);
  assert.doesNotThrow(()=>new Function(PANEL_JS));
 });
@@ -200,5 +200,62 @@ test('Channel analysis controls are part of the conversational panel',()=>{
  assert.match(PANEL_HTML,/id="codexScanScope"/);
  assert.match(PANEL_JS,/beginChatScan/);
  assert.match(PANEL_JS,/scan_channel_ids:codexPickedChannelIds/);
+ assert.doesNotThrow(()=>new Function(PANEL_JS));
+});
+
+
+test('Bushin cloud chat answers without Codespaces, never using a ChatGPT token',async()=>{
+ const DB=fakeDb();
+ const env={BUSHIN_OWNER_DISCORD_ID:owner,DB,BUSHIN_AI:{async run(model,input){
+  assert.match(model,/llama-3.1/);
+  assert.match(input.messages[0].content,/Bushin Cloud/);
+  assert.match(input.messages[1].content,/Qual minha missão/);
+  assert.doesNotMatch(input.messages[1].content,/Você é o Codex no chat/);
+  return {response:'Missão não confirmada. Abra o perfil ou verifique a missão.'};
+ }}};
+ const h={reply,baseUrl};
+ let r=await codexBridgeMobile(mobile(),env,ctx,h);
+ const status=await r.json();
+ assert.equal(status.connected,false,'no CLI required');
+ assert.equal(status.cloud_ready,true);
+ assert.equal(status.cloud_codex_ready,false);
+ r=await codexBridgeMobile(mobile('POST',{
+  action:'cloud_chat',provider:'llama',intent:'missoes',question:'Qual minha missão?',
+  scan_scope:'none',context:'Não há perfil confiável.'
+ }),env,ctx,h);
+ assert.equal(r.status,200);
+ const answer=await r.json();
+ assert.equal(answer.provider,'llama');
+ assert.match(answer.model,/Llama 3.1/);
+ assert.match(answer.answer,/Missão não confirmada/);
+ assert.equal(answer.executed_command,false);
+ assert.equal(answer.sent,false);
+ assert.equal(answer.chat_history.length,2);
+ assert.match(answer.chat_history[1].model,/Llama/);
+ r=await codexBridgeMobile(mobile(),env,ctx,h);
+ assert.equal((await r.json()).chat_history.length,2);
+});
+test('Cloud Codex API cannot be used without billing secret and no fallback is disguised',async()=>{
+ const env={BUSHIN_OWNER_DISCORD_ID:owner,DB:fakeDb(),BUSHIN_AI:{run(){throw Error('must not fallback to Llama')}}};
+ let r=await codexBridgeMobile(mobile('POST',{
+  action:'cloud_chat',provider:'codex_api',intent:'conversar',question:'Oi'
+ }),env,ctx,{reply,baseUrl});
+ assert.equal(r.status,503);
+ const body=await r.json();
+ assert.equal(body.code,'missing_api_key');
+ assert.match(body.error,/OPENAI_API_KEY/);
+ r=await codexBridgeMobile(mobile('POST',{
+  action:'cloud_chat',provider:'hack',intent:'conversar',question:'Oi'
+ }),env,ctx,{reply,baseUrl});
+ assert.equal(r.status,400);
+});
+test('UI distinguishes Codex CLI, Llama Cloud and API Codex models',()=>{
+ assert.match(PANEL_HTML,/id="codexRuntime"/);
+ assert.match(PANEL_HTML,/value="cli"/);
+ assert.match(PANEL_HTML,/value="llama"/);
+ assert.match(PANEL_HTML,/value="codex_api"/);
+ assert.match(PANEL_HTML,/não joga automaticamente/);
+ assert.match(PANEL_JS,/cloud_chat/);
+ assert.match(PANEL_JS,/row.model/);
  assert.doesNotThrow(()=>new Function(PANEL_JS));
 });
