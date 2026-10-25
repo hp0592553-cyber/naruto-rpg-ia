@@ -3,6 +3,8 @@
 import asyncio
 import inspect
 import json
+import math
+import re
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -140,6 +142,48 @@ async def discover(command_path="missoes minhas"):
 
 
 
+def prepare_options(command, options):
+    """Validate against the real catalog before reserving or sending an action."""
+    known = {o.name: o for o in getattr(command, 'options', [])}
+    if set(options) - set(known):
+        raise ValueError('unknown_options')
+    if any(getattr(o, 'required', False) and name not in options for name, o in known.items()):
+        raise ValueError('missing_options')
+    prepared = {}
+    for name, value in options.items():
+        opt = known[name]
+        kind = getattr(opt.type, 'value', opt.type)
+        if kind in (6, 7, 8, 9):
+            if not isinstance(value, str):
+                raise ValueError('invalid_id')
+            match = re.fullmatch(r'(?:<@!?([0-9]{15,22})>|<@&([0-9]{15,22})>|<#([0-9]{15,22})>|([0-9]{15,22}))', value.strip())
+            if not match:
+                raise ValueError('invalid_id')
+            value = discord.Object(id=int(next(v for v in match.groups() if v)))
+        elif kind == 3:
+            if not isinstance(value, str) or len(value) > 2000:
+                raise ValueError('invalid_string')
+        elif kind == 5:
+            if type(value) is not bool:
+                raise ValueError('invalid_boolean')
+        elif kind in (4, 10):
+            if type(value) not in (int, float) or not math.isfinite(value) or (kind == 4 and value != int(value)):
+                raise ValueError('invalid_number')
+            for attr, invalid in [('min_value', lambda v: value < v), ('max_value', lambda v: value > v)]:
+                limit = getattr(opt, attr, None)
+                if limit is not None and invalid(limit):
+                    raise ValueError('out_of_range')
+            if kind == 4:
+                value = int(value)
+        else:
+            raise ValueError('unsupported_option_type')
+        choices = getattr(opt, 'choices', [])
+        if choices and not any(value == c.value and type(value) is type(c.value) for c in choices):
+            raise ValueError('invalid_choice')
+        prepared[name] = value
+    return prepared
+
+
 async def consult(command_path="missoes minhas", options=None):
     options = options or {}
     if state['command_attempted']:
@@ -153,6 +197,10 @@ async def consult(command_path="missoes minhas", options=None):
     missing = [name for name, opt in known.items() if getattr(opt, 'required', False) and name not in options]
     if missing:
         return {**state, 'status': 'missing_options', 'missing': missing}
+    try:
+        prepared = prepare_options(command, options)
+    except ValueError as exc:
+        return {**state, 'status': 'invalid_options', 'validation': str(exc)}
     if os.getenv('RPG_MODE') != 'jogar':
         return {**state, 'status': 'blocked_read_only'}
     marker = Path(os.environ['RPG_ACTION_MARKER'])
@@ -171,7 +219,7 @@ async def consult(command_path="missoes minhas", options=None):
             await received.put(message)
     client.receiver = on_message
     try:
-        interaction = await asyncio.wait_for(command(channel, **options), timeout=45)
+        interaction = await asyncio.wait_for(command(channel, **prepared), timeout=45)
         interaction_id = getattr(interaction, 'id', None)
         state.update(command_sent=True, interaction_id=str(interaction_id) if interaction_id else None)
         audit('command_send', 'submitted', evidence=dict(state))
