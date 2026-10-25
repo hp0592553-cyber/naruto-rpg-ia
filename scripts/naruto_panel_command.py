@@ -3,6 +3,20 @@ import asyncio
 import json
 import os
 import re
+import urllib.request
+import urllib.parse
+
+
+def publish_response(response):
+    endpoint = 'https://bushin-discord-direct.henrique-silva081106.workers.dev/internal/discord2-result'
+    oidc_url = os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=' + urllib.parse.quote(endpoint, safe='')
+    request = urllib.request.Request(oidc_url, headers={'Authorization':'Bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+    with urllib.request.urlopen(request, timeout=15) as handle:
+        oidc = json.load(handle)['value']
+    payload = json.dumps({'request_id':os.environ['RPG_REQUEST_ID'],'response':response}).encode()
+    request = urllib.request.Request(endpoint, data=payload, headers={'Authorization':'Bearer ' + oidc,'Content-Type':'application/json'}, method='POST')
+    with urllib.request.urlopen(request, timeout=20) as handle:
+        return json.load(handle).get('saved') is True
 
 
 def validate_request(raw):
@@ -42,8 +56,13 @@ async def run(data):
         if executor.connection:
             executor.connection.cancel()
             await asyncio.gather(executor.connection, return_exceptions=True)
+    if result.get("command_completed") and result.get("response"):
+        try:
+            result["response_relayed"] = await asyncio.to_thread(publish_response, result["response"])
+        except Exception:
+            result["response_relayed"] = False
     # Do not print response bodies or raw exceptions into public workflow logs.
-    public = {k: result.get(k) for k in ('status', 'command_attempted', 'command_sent', 'command_completed', 'interaction_id', 'http_status', 'error_type', 'missing')}
+    public = {k: result.get(k) for k in ('status', 'command_attempted', 'command_sent', 'command_completed', 'interaction_id', 'http_status', 'error_type', 'missing', 'response_relayed')}
     print(json.dumps(public, ensure_ascii=False))
     return 0 if result.get('command_completed') is True else 1
 
