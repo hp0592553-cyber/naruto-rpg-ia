@@ -106,3 +106,12 @@ metadados da interação e indicação de mídia sem texto extraído. O observad
 informa quais mensagens estão correlacionadas ao dono. Não há execução automática
 nessa mudança. Os 28 testes locais passaram, incluindo a passagem desses dados
 pelo endpoint de IA; rede, modelo e D1 desse teste são simulados.
+
+## Autorização de comandos no Discord 2
+
+A página de consentimento deixou de afirmar um erro de aplicativo desconhecido
+sem evidência. GET /mobile/discord2/api/command-auth verifica a sessão, o usuário
+e o aplicativo via OAuth2 @me. O início do consentimento também valida essa
+identidade antes de redirecionar. Instalação e executor Naruto permanecem
+explicitamente não confirmados. Não há novo escopo que conceda execução dos
+comandos de outro aplicativo. 32 testes locais passaram com provedores simulados.

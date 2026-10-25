@@ -690,6 +690,26 @@ async function mobileDm(req,env){
    '<p class="muted">O Discord pode recusar DMs de bots se eles não compartilharem servidor ou se o usuário bloquear DMs. Nenhum envio é feito ao abrir esta página.</p>'+
    '<a class="button" href="/mobile/features">Voltar às ferramentas</a>');
 }
+export async function inspectCommandAuthorization(env,row){
+ const baseStatus={application_id:DISCORD_CLIENT_ID,application_matches:false,
+   naruto_executor_authorized:false,installation_verified:false,
+   executor_status:"not_connected",consent_url:null};
+ if(!row||row.user_id!==env.BUSHIN_OWNER_DISCORD_ID)return {...baseStatus,state:"unauthorized",reason:"Conta Henrique não verificada."};
+ try{
+   const credentials=await unseal(row.creds_encrypted,env);
+   if(credentials.expires<=now()+30000)return {...baseStatus,state:"expired",reason:"O login Discord expirou. Reconecte pela página da conta."};
+   const response=await fetch(DISCORD+"/oauth2/@me",{
+     headers:{authorization:"Bearer "+credentials.access,accept:"application/json"},signal:AbortSignal.timeout(10000)});
+   if(!response.ok)return {...baseStatus,state:response.status===401?"expired":"unavailable",
+     reason:response.status===401?"Discord recusou a sessão OAuth. Reconecte pela página da conta.":"Discord não confirmou a autorização (HTTP "+response.status+")."};
+   const info=await response.json();
+   if(info?.user?.id!==row.user_id||String(info?.application?.id||"")!==DISCORD_CLIENT_ID)
+     return {...baseStatus,state:"identity_mismatch",reason:"A conta ou o aplicativo retornado pelo Discord difere do Bushin autorizado."};
+   return {...baseStatus,state:"identity_verified",application_matches:true,
+     consent_url:personalCommandsConsentUrl(),
+     reason:"Discord confirmou Henrique e o aplicativo Bushin. A instalação de comandos é uma autorização separada; o executor Naruto ainda não está conectado."};
+ }catch{return {...baseStatus,state:"unavailable",reason:"Não foi possível conferir a autorização com o Discord."};}
+}
 async function mobilePersonalCommands(req,env){
  // Provide a precise, owner-only diagnostic BEFORE redirecting to an
  // installation flow which may say "Unknown Application". This does not
@@ -697,33 +717,11 @@ async function mobilePersonalCommands(req,env){
  const row=await mobileSessionOwner(req,env);
  if(!row)return mGo("/mobile");
  const portal="https://discord.com/developers/applications/"+DISCORD_CLIENT_ID+"/installation";
- let status="Não foi possível verificar o aplicativo usando esta sessão OAuth.";
- let appMatches=false;
- try{
-   const credentials=await unseal(row.creds_encrypted,env);
-   if(credentials.expires>now()+30000){
-     const result=await fetch(DISCORD+"/oauth2/@me",{
-       headers:{authorization:"Bearer "+credentials.access,accept:"application/json"},
-       signal:AbortSignal.timeout(10000)
-     });
-     if(result.ok){
-       const info=await result.json();
-       const appId=String(info?.application?.id||"");
-       if(info?.user?.id===row.user_id&&/^\d{15,22}$/.test(appId)){
-         appMatches=appId===DISCORD_CLIENT_ID;
-         status=appMatches?
-           "O Discord confirmou que seu login pertence ao aplicativo "+String(info.application.name||"Bushin").slice(0,70)+" (ID "+appId+").":
-           "ATENÇÃO: o OAuth conectado pertence ao aplicativo "+appId+", mas o link tenta usar "+DISCORD_CLIENT_ID+".";
-       }else{
-         status="O Discord não confirmou o ID do aplicativo associado a este login.";
-       }
-     }else if(result.status===401){
-       status="Sua autorização OAuth expirou; consulte a página principal antes de tentar novamente.";
-     }
-   }
- }catch{}
+ const auth=await inspectCommandAuthorization(env,row);
+ const appMatches=auth.application_matches===true;
+ const status=auth.reason;
  const guide='<p>'+mEsc(status)+'</p>'+
-   '<p>O Discord mostrou <strong>Aplicativo desconhecido</strong>. Antes de tentar novamente, confira:</p>'+
+   '<p>Esta autorização instala os comandos do Bushin na sua conta. Ela não concede ao site execução dos comandos ou botões do Naruto Bot.</p><p>Confira a configuração do aplicativo:</p>'+
    '<ol style="line-height:1.75;padding-left:22px">'+
    '<li>No Discord Developer Portal → <strong>General Information</strong>, confirme o <strong>Application ID '+mEsc(DISCORD_CLIENT_ID)+'</strong>.</li>'+
    '<li>Em <strong>Installation → Installation Contexts</strong>, habilite <strong>User Install</strong>.</li>'+
@@ -739,6 +737,8 @@ async function mobilePersonalCommands(req,env){
 async function mobilePersonalCommandsStart(req,env){
  const row=await mobileSessionOwner(req,env);
  if(!row)return mGo("/mobile");
+ const auth=await inspectCommandAuthorization(env,row);
+ if(!auth.application_matches)return mPage("Autorização não confirmada",'<p>'+mEsc(auth.reason)+'</p><a class="button" href="/mobile">Conferir minha conexão</a>');
  return mGo(personalCommandsConsentUrl());
 }
 async function mobileStart(req,env){
@@ -829,6 +829,10 @@ export default {
           const cursor=new URL(req.url).searchParams.get("before")||null;
           const result=await personalForumThreads(env,forumPostRoute[1],ctx,cursor);
           return reply(result,result.listed?200:503,headers);
+        }
+        if(path==="/mobile/discord2/api/command-auth"&&req.method==="GET"){
+          const auth=await inspectCommandAuthorization(env,row);
+          return reply(auth,auth.application_matches?200:auth.state==="expired"?401:503,headers);
         }
         if(path==="/mobile/discord2/api/commands"&&req.method==="GET"){
           const inspected=await personalInspectCommand(env,{command:"/perfil ver"},ctx);
