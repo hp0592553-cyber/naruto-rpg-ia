@@ -83,17 +83,22 @@ def pair() -> str:
     return token
 
 
-def codex_echo(prompt: str) -> tuple[bool, str]:
-    if prompt != "Responda apenas: " + EXPECTED:
-        return False, "Prompt não permitido."
+def codex_infer(prompt: str, is_chat: bool = False) -> tuple[bool, str]:
+    """Fixed echo or bounded read-only RPG advice; no Discord commands are executed."""
     if not shutil.which("codex"):
         return False, "Codex CLI não instalado neste Codespaces."
-    # Only a fixed echo prompt, read-only, no arbitrary remote commands.
+    if is_chat:
+        if not prompt.startswith("BUSHIN_CODEX_CHAT_V1\n") or len(prompt) > 10500:
+            return False, "Solicitação de chat não reconhecida."
+    elif prompt != "Responda apenas: " + EXPECTED:
+        return False, "Prompt do teste não permitido."
+    # Run in a temporary empty directory, not in the RPG repo or Codex's project.
     with tempfile.TemporaryDirectory(prefix="bushin-codex-") as tmp:
         output_file = Path(tmp) / "final.txt"
         command = [
-            "codex", "exec", "--ephemeral", "--sandbox", "read-only",
-            "--output-last-message", str(output_file), prompt,
+            "codex", "exec", "--ephemeral", "--skip-git-repo-check",
+            "--sandbox", "read-only", "--output-last-message", str(output_file),
+            prompt,
         ]
         safe_env_names = (
             "PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "CODEX_HOME",
@@ -104,20 +109,31 @@ def codex_echo(prompt: str) -> tuple[bool, str]:
         safe_env = {key: os.environ[key] for key in safe_env_names if key in os.environ}
         try:
             result = subprocess.run(
-                command, cwd=WORKDIR, env=safe_env, capture_output=True,
-                text=True, timeout=120, check=False,
+                command, cwd=tmp, env=safe_env, capture_output=True,
+                text=True, timeout=150, check=False,
             )
         except subprocess.TimeoutExpired:
-            return False, "Codex ultrapassou 120 segundos."
+            return False, "Codex ultrapassou 150 segundos."
         except OSError:
             return False, "Não foi possível iniciar o Codex CLI."
         try:
             output = output_file.read_text(encoding="utf-8").strip()
         except OSError:
             output = ""
-        if result.returncode == 0 and output == EXPECTED:
-            return True, output
-        return False, "Codex não retornou a confirmação esperada. Verifique sua sessão com 'codex login status'."
+        if result.returncode == 0:
+            if is_chat and output:
+                return True, output[:2600]
+            if not is_chat and output == EXPECTED:
+                return True, EXPECTED
+        return False, "Codex não retornou uma resposta válida. Confira sua sessão com 'codex login status'."
+
+
+def codex_echo(prompt: str) -> tuple[bool, str]:
+    return codex_infer(prompt, is_chat=False)
+
+
+def codex_chat(prompt: str) -> tuple[bool, str]:
+    return codex_infer(prompt, is_chat=True)
 
 
 def main() -> int:
@@ -136,20 +152,23 @@ def main() -> int:
     try:
         while True:
             try:
-                queue = request("/internal/codex-bridge/queue", token=token)
+                queue = request("/internal/codex-bridge/queue?capabilities=chat-v1", token=token)
                 job = queue.get("job")
                 if job:
-                    if job.get("kind") != "echo" or not isinstance(job.get("id"), str):
+                    if job.get("kind") not in ("echo", "chat") or not isinstance(job.get("id"), str):
                         print("Recebi uma solicitação desconhecida; não vou executar.")
                     else:
-                        print("🤖 Executando teste seguro do Codex...")
-                        success, message = codex_echo(str(job.get("prompt") or ""))
+                        chat = job.get("kind") == "chat"
+                        print("🤖 Respondendo chat do Bushin..." if chat else "🤖 Executando teste seguro do Codex...")
+                        prompt = str(job.get("prompt") or "")
+                        success, message = codex_chat(prompt) if chat else codex_echo(prompt)
                         request("/internal/codex-bridge/result", token=token, data={
                             "id": job["id"], "success": success,
                             "output": message if success else "",
                             "error": "" if success else message,
                         })
-                        print("✅ Teste enviado ao Bushin." if success else "⚠️ Teste falhou: " + message)
+                        print("✅ Resposta entregue ao chat Bushin." if success and chat else
+                              "✅ Teste enviado ao Bushin." if success else "⚠️ Codex falhou: " + message)
             except RuntimeError as exc:
                 message = str(exc)
                 print("⚠️ " + message, file=sys.stderr)
