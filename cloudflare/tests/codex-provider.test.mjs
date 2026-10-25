@@ -9,6 +9,10 @@ test('Codex picker remains optional and defaults to existing Llama',()=>{
  assert.match(PANEL_HTML,/value="codex"/);
  assert.match(PANEL_JS,/provider:providerSelect.value/);
  assert.doesNotThrow(()=>new Function(PANEL_JS));
+ assert.match(PANEL_HTML,/https:\/\/auth\.openai\.com\/api\/accounts\/deviceauth\/usercode/);
+ assert.match(PANEL_HTML,/codex login --device-auth/);
+ assert.match(PANEL_HTML,/id="codexLoginNotice"/);
+ assert.match(PANEL_JS,/copyCodexLogin/);
  assert.ok(!PANEL_HTML.includes('sk-'));
 });
 
