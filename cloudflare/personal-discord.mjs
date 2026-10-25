@@ -250,12 +250,12 @@ export async function personalInspectCommand(env,args={},ctx={}){
 
 export async function personalInvokeProfileProbe(env,ctx={}) {
  const uid=owner(env,ctx),channelId="1520114348079583263",appId="1515908078913192026";
+ const registry=await personalInspectCommand(env,{command:"/perfil ver",channel_id:channelId},ctx);
+ if(registry.catalog_verified!==true)return {state:"unavailable",submitted:false,confirmed:false,
+  reason:registry.reason||"Discord não retornou um catálogo verificável; nenhuma interação foi enviada.",
+  ...(registry.code?{discord_status:registry.code}:{}),stage:"command_catalog"};
  const auth=await authorize(env,ctx);
- if(auth.state!=="completed")return {state:"unavailable",submitted:false,confirmed:false,reason:auth.reason||"Identidade pessoal indisponível."};
- const channel=await checkChannel(auth.token,channelId);
- if(channel.state!=="completed")return {state:"unavailable",submitted:false,confirmed:false,reason:channel.reason||"Canal indisponível."};
- const registry=await personalInspectCommand(env,{command:"/perfil ver"},ctx);
- if(registry.catalog_verified!==true)return {state:"unavailable",submitted:false,confirmed:false,reason:"Não foi possível verificar o comando real do Naruto Bot."};
+ if(auth.state!=="completed")return {state:"unavailable",submitted:false,confirmed:false,reason:auth.reason||"Identidade pessoal indisponível.",stage:"identity"};
  const root=(registry.commands||[]).find(c=>String(c.application_id)===appId&&c.name==="perfil");
  const sub=root?.options?.find(o=>o.name==="ver"&&Number(o.type)===1);
  if(!root?.id||!root?.version||!sub)return {state:"unavailable",submitted:false,confirmed:false,reason:"/perfil ver não encontrado no catálogo real do Naruto Bot."};

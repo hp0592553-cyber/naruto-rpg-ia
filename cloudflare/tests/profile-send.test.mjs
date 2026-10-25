@@ -44,3 +44,9 @@ for(const httpStatus of [204,401,403,429])test('profile probe uses an interactio
  assert.equal(posts[0].payload.data.options[0].name,'ver');
  assert.equal(r.submitted,httpStatus===204);assert.equal(r.confirmed,false);assert.equal(r.executed,false);
 });
+test('catalog rejection preserves the real provider error and never attempts an interaction',async t=>{
+ let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;return new Response(null,{status:429})});
+ const r=await personalInvokeProfileProbe({BUSHIN_OWNER_DISCORD_ID:'481485837801095178',DISCORD_USER_TOKEN:'synthetic-placeholder-never-a-real-key-123456789'},{me:{id:'481485837801095178',membership:{member:true}}});
+ assert.equal(calls,1);assert.equal(r.submitted,false);assert.equal(r.discord_status,429);assert.equal(r.stage,'command_catalog');assert.match(r.reason,/429/);
+ assert.ok(!PANEL_JS.includes('confirm("Enviar para o Discord como Henrique?'));
+});
