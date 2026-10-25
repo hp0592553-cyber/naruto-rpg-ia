@@ -308,7 +308,7 @@ export async function personalInvokeProfileProbe(env,ctx={}) {
  try {
   const response=await fetch("https://discord.com/api/v9/interactions",{
    method:"POST",headers:{Authorization:auth.token,Accept:"application/json","Content-Type":"application/json",Origin:"https://discord.com"},
-   body:JSON.stringify(payload),redirect:"error",signal:controller.signal
+   body:JSON.stringify(payload),redirect:"manual",signal:controller.signal
   });
   const accepted=response.status===204||response.status===200;
   return {state:accepted?"submitted":"unavailable",submitted:accepted,confirmed:false,channel_id:channelId,
