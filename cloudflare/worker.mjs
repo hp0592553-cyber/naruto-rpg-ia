@@ -858,7 +858,7 @@ export default {
               if(response.status===204||response.status===202)return {ok:true,status:response.status,data:null};
               if(!response.ok)return {ok:false,error:"GitHub retornou HTTP "+response.status,status:response.status};
               return {ok:true,data:await response.json(),status:response.status};
-            }catch{return {ok:false,error:"Não foi possível conectar ao GitHub Actions.",status:503}}finally{clearTimeout(timeout)}
+            }catch{return {ok:false,error:ctrl.signal.aborted?"GitHub Actions não respondeu em 12 segundos. Nenhuma repetição automática.":"Falha de transporte ao consultar GitHub Actions. Nenhuma repetição automática.",status:503}}finally{clearTimeout(timeout)}
           };
           const getState=async()=>{try{const r=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(owner,KEY).first();return r?JSON.parse(r.value_json):null}catch{return null}};
           const save=async(value,minAge=0)=>{
@@ -870,8 +870,9 @@ export default {
           const candidate=(runs,st)=>runs.filter(r=>r.head_branch==="Projeto"&&Number(r.run_number||0)>Number(st.baseline||0)&&Date.parse(r.created_at||"")>=Number(st.at||0)-15000).sort((a,b)=>Number(a.run_number)-Number(b.run_number))[0]||null;
           const publicRun=r=>r?{id:String(r.id),url:"https://github.com/"+REPO+"/actions/runs/"+r.id,status:String(r.status||"unknown"),conclusion:String(r.conclusion||""),run_number:Number(r.run_number||0)}:null;
           if(req.method==="GET"){
-            const st=await getState();if(!st)return reply({state:"idle",executed:false,confirmed:false},200,HEAD);
-            const runs=await getRuns();if(!runs.ok)return reply({state:"unavailable",error:runs.error,requested_at:st.at},503,HEAD);
+            const st=await getState();
+            const runs=await getRuns();if(!runs.ok)return reply({state:"unavailable",error:runs.error,upstream_status:runs.status,requested_at:st?.at,executed:false,confirmed:false},503,HEAD);
+            if(!st)return reply({state:"idle",workflow_available:true,executed:false,confirmed:false,note:"Conexão com GitHub Actions confirmada; nenhuma execução solicitada."},200,HEAD);
             const r=candidate(runs.data?.workflow_runs||[],st);
             if(!r)return reply({state:st.phase||"requested",requested_at:st.at,run:null,executed:false,confirmed:false,note:"GitHub pode demorar a listar um workflow recém-solicitado."},200,HEAD);
             return reply({state:r.status==="completed"?"finished":r.status,run:publicRun(r),requested_at:st.at,executed:false,confirmed:false,
