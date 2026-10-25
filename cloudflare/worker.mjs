@@ -867,7 +867,7 @@ export default {
             .bind(owner,KEY,JSON.stringify(value),now,now-minAge).run();return Number(result.meta?.changes||0)===1;
           };
           const getRuns=()=>requestGitHub("/actions/workflows/"+WF+"/runs?branch=Projeto&event=workflow_dispatch&per_page=15");
-          const candidate=(runs,st)=>runs.filter(r=>r.head_branch==="Projeto"&&Number(r.run_number||0)>Number(st.baseline||0)&&Date.parse(r.created_at||"")>=Number(st.at||0)-15000).sort((a,b)=>Number(a.run_number)-Number(b.run_number))[0]||null;
+          const candidate=(runs,st)=>runs.filter(r=>(!st.request_id||r.display_title==="Discord 2 "+st.request_id)&&r.head_branch==="Projeto"&&Number(r.run_number||0)>Number(st.baseline||0)&&Date.parse(r.created_at||"")>=Number(st.at||0)-15000).sort((a,b)=>Number(a.run_number)-Number(b.run_number))[0]||null;
           const publicRun=r=>r?{id:String(r.id),url:"https://github.com/"+REPO+"/actions/runs/"+r.id,status:String(r.status||"unknown"),conclusion:String(r.conclusion||""),run_number:Number(r.run_number||0)}:null;
           if(req.method==="GET"){
             const st=await getState();
@@ -875,30 +875,32 @@ export default {
             if(!st)return reply({state:"idle",workflow_available:true,executed:false,confirmed:false,note:"Conexão com GitHub Actions confirmada; nenhuma execução solicitada."},200,HEAD);
             const r=candidate(runs.data?.workflow_runs||[],st);
             if(!r)return reply({state:st.phase||"requested",requested_at:st.at,run:null,executed:false,confirmed:false,note:"GitHub pode demorar a listar um workflow recém-solicitado."},200,HEAD);
-            return reply({state:r.status==="completed"?"finished":r.status,run:publicRun(r),requested_at:st.at,executed:false,confirmed:false,
-              note:r.status==="completed"?"Workflow finalizado. Confira o artefato naruto-jogada-tentativa para confirmar ação e resposta, não somente a conclusão do GitHub.":"Workflow "+String(r.status)+"; nenhuma jogada comprovada ainda."},200,HEAD);
+            return reply({state:r.status==="completed"?"finished":r.status,run:publicRun(r),requested_at:st.at,command:st.command,executed:st.mode==="comando"&&r.conclusion==="success",confirmed:st.mode==="comando"&&r.conclusion==="success",
+              note:st.mode==="comando"&&r.status==="completed"?(r.conclusion==="success"?"Resposta do Naruto Bot correlacionada ao comando "+st.command+".":"Execução sem resposta comprovada. Consulte o registro do executor; não reenvie automaticamente."):r.status==="completed"?"Workflow finalizado. Confira o artefato naruto-jogada-tentativa para confirmar ação e resposta, não somente a conclusão do GitHub.":"Workflow "+String(r.status)+"; nenhuma jogada comprovada ainda."},200,HEAD);
           }
           if(req.method!=="POST")return reply({error:"Método não permitido"},405,HEAD);
           if(req.headers.get("origin")!==base(env))return reply({error:"Origem inválida"},403,HEAD);
           if(!(req.headers.get("content-type")||"").startsWith("application/json"))return reply({error:"Formato inválido"},415,HEAD);
-          const raw=await req.text();if(raw.length>250)return reply({error:"Pedido longo demais"},413,HEAD);
+          const raw=await req.text();if(raw.length>12000)return reply({error:"Pedido longo demais"},413,HEAD);
           let data;try{data=JSON.parse(raw)}catch{return reply({error:"JSON inválido"},400,HEAD)}
           if(!["start","stop"].includes(data?.action))return reply({error:"Ação inválida"},400,HEAD);
+          const commandRequest=data.command_request;
+          if(commandRequest!==undefined&&(!commandRequest||typeof commandRequest.command!=="string"||commandRequest.command.length>100||!/^\/?[\p{L}\p{N}_-]+(?: [\p{L}\p{N}_-]+){0,2}$/u.test(commandRequest.command)||!/^\d{15,22}$/.test(commandRequest.channel_id)||!commandRequest.options||Array.isArray(commandRequest.options)||typeof commandRequest.options!=="object"||Object.keys(commandRequest.options).length>25||Object.values(commandRequest.options).some(v=>!["string","number","boolean"].includes(typeof v))))return reply({error:"Comando ou parâmetros inválidos."},400,HEAD);
           const st=await getState();
           if(data.action==="start"){
-            if(st&&Date.now()-Number(st.at||0)<600000)return reply({state:"cooldown",error:"Já foi solicitada uma tentativa nos últimos 10 minutos. Consulte o estado para não repetir."},409,HEAD);
+            if(!commandRequest&&st&&Date.now()-Number(st.at||0)<600000)return reply({state:"cooldown",error:"Já foi solicitada uma tentativa nos últimos 10 minutos. Consulte o estado para não repetir."},409,HEAD);
             const runs=await getRuns();if(!runs.ok)return reply({error:runs.error},503,HEAD);
             const rows=runs.data?.workflow_runs||[];
             if(rows.some(r=>r.head_branch==="Projeto"&&["queued","in_progress","waiting","requested"].includes(r.status)))
               return reply({state:"busy",error:"Já há uma execução OpenCode em andamento. Não vou duplicá-la."},409,HEAD);
             const now=Date.now(),baseline=Math.max(0,...rows.map(r=>Number(r.run_number||0)));
-            const reservation={at:now,baseline,phase:"dispatching",stopped:false};
-            try{if(!(await save(reservation,600000)))return reply({state:"busy",error:"Outra tentativa já foi reservada."},409,HEAD)}catch{return reply({error:"Falha ao reservar tentativa no banco de dados."},503,HEAD)}
-            const sent=await requestGitHub("/actions/workflows/"+WF+"/dispatches","POST",{ref:"Projeto",inputs:{mode:"jogar"}});
+            const reservation={at:now,baseline,phase:"dispatching",stopped:false,request_id:commandRequest?crypto.randomUUID():null,mode:commandRequest?"comando":"jogar",command:commandRequest?.command||"/missoes minhas"};
+            try{if(!(await save(reservation,commandRequest?30000:600000)))return reply({state:"busy",error:"Outra tentativa já foi reservada."},409,HEAD)}catch{return reply({error:"Falha ao reservar tentativa no banco de dados."},503,HEAD)}
+            const sent=await requestGitHub("/actions/workflows/"+WF+"/dispatches","POST",{ref:"Projeto",inputs:commandRequest?{mode:"comando",request_id:reservation.request_id,command_json:JSON.stringify(commandRequest)}:{mode:"jogar"}});
             if(!sent.ok){await save({...reservation,phase:"failed",reason:sent.error}).catch(()=>{});return reply({state:"unavailable",error:sent.error,submitted:false},503,HEAD)}
             await save({...reservation,phase:"requested"}).catch(()=>{});
-            return reply({state:"requested",submitted:true,executed:false,confirmed:false,command:"/missoes minhas",
-             note:"GitHub recebeu a solicitação do executor. O Naruto Bot ainda não confirmou nenhum comando; o workflow tentará uma consulta única de missões."},200,HEAD);
+            return reply({state:"requested",submitted:true,executed:false,confirmed:false,command:reservation.command,
+             note:"Executor solicitado para "+reservation.command+". Aguarde a confirmação; não repita o envio."},200,HEAD);
           }
           if(!st)return reply({state:"stopped",reason:"Nenhuma execução anterior."},200,HEAD);
           const runs=await getRuns();if(!runs.ok)return reply({state:"unavailable",error:runs.error},503,HEAD);
@@ -997,3 +999,4 @@ export default {
     }catch(e){return oauthReply(e);}
   }
 };
+
