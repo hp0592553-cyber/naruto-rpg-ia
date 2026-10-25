@@ -835,7 +835,7 @@ export default {
           return reply(auth,auth.application_matches?200:auth.state==="expired"?401:503,headers);
         }
         if(path==="/mobile/discord2/api/commands"&&req.method==="GET"){
-          const inspected=await personalInspectCommand(env,{command:"/perfil ver"},ctx);
+          const inspected=await personalInspectCommand(env,{command:"/perfil ver",channel_id:new URL(req.url).searchParams.get("channel_id")||"1520114348079583263"},ctx);
           return reply(inspected,inspected.catalog_verified===true?200:503,headers);
         }
         if(path==="/mobile/discord2/api/search/mine"&&req.method==="POST")return await searchHenriqueMessages(req,env,ctx,{reply,personalCall,baseUrl:base(env)});

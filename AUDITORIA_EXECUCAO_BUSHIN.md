@@ -115,3 +115,16 @@ e o aplicativo via OAuth2 @me. O início do consentimento também valida essa
 identidade antes de redirecionar. Instalação e executor Naruto permanecem
 explicitamente não confirmados. Não há novo escopo que conceda execução dos
 comandos de outro aplicativo. 32 testes locais passaram com provedores simulados.
+
+## Sincronização do catálogo por canal
+
+Consulta real retornou mode=personal_user_token, catalog_verified=true e
+/perfil ver encontrado. Também foram encontrados os comandos reais mapa, combate,
+missoes, jutsu, viajar e nivel com IDs e versões. Nenhuma interação foi enviada.
+
+O painel passou a usar channel_id na consulta, validar acesso à guild antes de
+consultar o registro, invalidar cache ao trocar de canal e descartar respostas
+atrasadas. Falhas não são substituídas por exemplos de guias. Cache válido dura
+até 60 segundos; o botão atualizar invalida o cache. Consultas simultâneas do
+mesmo canal são agrupadas. O catálogo é do registro da guild, não uma garantia de
+permissão para executar cada comando no canal. 35 testes locais passaram.

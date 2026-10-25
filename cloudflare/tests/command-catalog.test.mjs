@@ -15,6 +15,18 @@ test('discovers only real Naruto command paths without submitting an interaction
  const missing=await personalInspectCommand(env,{command:'/missoes minhas'},ctx);
  assert.equal(missing.command_found,false);assert.equal(missing.state,'command_not_found');
 });
+test('catalog checks the requested channel guild before reading command registries',async t=>{
+ const owner='481485837801095178',channel='1532489544161562857',paths=[];
+ t.mock.method(globalThis,'fetch',async u=>{
+  paths.push(u);return Response.json(u.endsWith('/users/@me')?{id:owner}:{guild_id:'111111111111111111'});
+ });
+ const env={BUSHIN_OWNER_DISCORD_ID:owner,DISCORD_USER_TOKEN:'synthetic-placeholder-token-long-enough-for-fixture'};
+ const ctx={me:{id:owner,membership:{member:true}}};
+ const r=await personalInspectCommand(env,{command:'/perfil ver',channel_id:channel},ctx);
+ assert.equal(r.catalog_verified,false);assert.equal(paths.length,2);assert.ok(paths[1].endsWith('/channels/'+channel));
+ await assert.rejects(personalInspectCommand(env,{command:'/perfil ver',channel_id:'invalid'},ctx),/canal/);
+ assert.equal(paths.length,2);
+});
 test('another application cannot satisfy a missing Naruto command',async t=>{
  const owner='481485837801095178',naruto='1515908078913192026';
  t.mock.method(globalThis,'fetch',async(u,o)=>{

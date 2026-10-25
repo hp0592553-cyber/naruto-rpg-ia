@@ -209,9 +209,11 @@ export async function personalListChannels(env,ctx={}){
 export async function personalInspectCommand(env,args={},ctx={}){
  owner(env,ctx);
  if(typeof args.command!=="string"||!/^\/[a-z0-9_-]{1,32}( [a-z0-9_-]{1,32}){0,2}$/.test(args.command))throw Error("Informe o caminho do comando, sem valores de parâmetros.");
+ const channelId=args.channel_id===undefined?"1520114348079583263":args.channel_id;
+ if(!id(channelId))throw Error("ID de canal inválido.");
  const auth=await authorize(env,ctx);
  if(auth.state!=="completed")return {...auth,catalog_verified:false,executed:false,sent:false};
- const channel=await checkChannel(auth.token,"1520114348079583263");
+ const channel=await checkChannel(auth.token,channelId);
  if(channel.state!=="completed")return {...channel,catalog_verified:false,executed:false,sent:false};
  const result=await request(auth.token,"/guilds/"+GUILD+"/application-command-index");
  const direct=await request(auth.token,"/applications/1515908078913192026/commands");
@@ -238,6 +240,8 @@ export async function personalInspectCommand(env,args={},ctx={}){
  let matched=roots.length===1?roots[0]:null;
  for(const name of parts.slice(1))matched=matched?.options?.find(o=>[1,2].includes(o.type)&&o.name===name);
  return {state:matched?"command_found":"command_not_found",mode:"personal_user_token",catalog_verified:true,
+  channel_id:channelId,guild_id:GUILD,catalog_scope:"guild_registry",synced_at:Date.now(),
+  channel_execution_permissions_verified:false,
   requested_command:args.command,command_found:!!matched,matched:matched||null,commands,
   executor_status:"not_connected",executed:false,sent:false,
   note:"Catálogo real consultado; nenhuma interação enviada. O executor de ações ainda não está conectado."};
