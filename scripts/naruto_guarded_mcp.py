@@ -20,6 +20,27 @@ NARUTO_BOT_ID = 1515908078913192026
 app = Server('naruto-rpg-guardado')
 class RestrictedClient(discord.Client):
     receiver = None
+    raw_messages = None
+
+    async def on_socket_raw_receive(self, payload):
+        # Keep Components V2 even when the installed model cannot deserialize them.
+        if not isinstance(payload, str):
+            return
+        try:
+            event = json.loads(payload)
+        except (ValueError, TypeError):
+            return
+        if event.get('t') not in {'MESSAGE_CREATE', 'MESSAGE_UPDATE'}:
+            return
+        data = event.get('d') or {}
+        if str(data.get('channel_id', '')) != str(CHANNEL_ID) or not data.get('id'):
+            return
+        if self.raw_messages is None:
+            self.raw_messages = {}
+        key = str(data['id'])
+        self.raw_messages[key] = {**self.raw_messages.get(key, {}), **data}
+        while len(self.raw_messages) > 32:
+            self.raw_messages.pop(next(iter(self.raw_messages)))
 
     async def on_message(self, message):
         if self.receiver:
@@ -30,7 +51,7 @@ class RestrictedClient(discord.Client):
             await self.receiver(after)
 
 
-client = RestrictedClient()
+client = RestrictedClient(enable_debug_events=True)
 connection = None
 channel = None
 commands = []
@@ -105,11 +126,12 @@ async def status():
 def message_data(message):
     metadata = getattr(message, 'interaction', None) or getattr(message, 'interaction_metadata', None)
     user = getattr(metadata, 'user', None)
+    raw = (client.raw_messages or {}).get(str(message.id), {})
     return {'message_id': str(message.id), 'author_id': str(message.author.id),
             'channel_id': str(message.channel.id), 'content': message.content,
             'timestamp': message.created_at.isoformat(), 'flags': message.flags.value,
             'embeds': [embed.to_dict() for embed in message.embeds],
-            'components': [component.to_dict() for component in getattr(message, 'components', [])],
+            'components': raw.get('components', [component.to_dict() for component in getattr(message, 'components', [])]),
             'attachments': [attachment.to_dict() for attachment in message.attachments],
             'interaction_metadata': {'id': str(getattr(metadata, 'id', '')),
                 'user_id': str(getattr(user, 'id', ''))},
@@ -240,7 +262,10 @@ async def consult(command_path="missoes minhas", options=None):
             if getattr(msg.flags, 'loading', False):
                 continue
             if interaction_id and getattr(metadata, 'id', None) == interaction_id:
-                state.update(command_completed=True, response=message_data(msg))
+                response = message_data(msg)
+                if not any(response.get(key) for key in ('content', 'embeds', 'components', 'attachments')):
+                    continue
+                state.update(command_completed=True, response=response)
                 # Conteudo capturado e verificavel; nao inferir XP/nivel automaticamente.
                 return {**state, 'status': 'response_received', 'rpg_state_verified': False}
         return {**state, 'status': 'submitted_response_not_correlated'}
