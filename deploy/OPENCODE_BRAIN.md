@@ -10,3 +10,7 @@ The Discord 2 service mode installs OpenCode 1.19.4 and calls it for queued deci
 - Memory is supplied explicitly from stored observations and learning evidence on each decision. This does not retrain model weights.
 - The Actions session remains temporary (25 minutes). This is not 24/7 hosting or a guarantee of complete autonomous play.
 - No other branches are merged, deleted or deployed by this change.
+
+## Headless transport
+
+Planner revision `server-v3` uses the documented `opencode serve` HTTP API instead of parsing `opencode run` stdout. The server binds only to loopback and has an ephemeral Basic Auth password. Health, session creation and model response have separate bounded timeouts (20/15/55 seconds), and the process is always terminated after the decision. Errors report a stage and sanitized category/status; provider messages and logs are not published. Tests cover successful planning, provider quota errors, model timeout cleanup and exclusion of Discord credentials. Unit tests and a green workflow do not establish live model availability.
