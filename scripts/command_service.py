@@ -103,7 +103,8 @@ async def main():
     if github:
         try:
             SESSION_TOKEN = await asyncio.to_thread(enroll_github)
-        except Exception:
+        except Exception as exc:
+            print('Enrollment error type: ' + type(exc).__name__ + ' HTTP=' + str(getattr(exc, 'code', None)), flush=True)
             raise SystemExit('GitHub session authorization failed; nothing sent') from None
     if not os.environ.get('DISCORD_USER_TOKEN') or len(SESSION_TOKEN or os.environ.get('BUSHIN_EXECUTOR_TOKEN', '')) < 43:
         raise SystemExit('Service credentials missing; nothing sent')
