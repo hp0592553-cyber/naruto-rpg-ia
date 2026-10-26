@@ -24,7 +24,7 @@ export async function commandServiceRunner(req,env,{seal,normalize}){
  if(new URL(req.url).pathname==='/bridge/commands/enroll'){
   const audience=new URL(req.url).origin+'/bridge/commands/enroll';
   const identity=await verifySessionJwt((req.headers.get('authorization')||'').replace(/^Bearer /,''),env,audience);
-  if(!identity)return json({error:'Sessão GitHub não autorizada'},401);
+  if(!identity?.run_id)return json({error:'Sessão GitHub não autorizada',stage:identity?.stage||'unknown'},401);
   const token=crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
   await put(env,'discord2_service_auth_v1',{hash:await digest(token),expires:Date.now()+30*60000,run_id:identity.run_id});
   return json({token,expires_in:1800});

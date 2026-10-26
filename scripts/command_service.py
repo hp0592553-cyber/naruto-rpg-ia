@@ -20,8 +20,14 @@ def enroll_github():
     with urlopen(req, timeout=15) as handle:
         jwt = json.load(handle)['value']
     req = Request(audience, data=b'{}', method='POST', headers={'Authorization': 'Bearer ' + jwt, 'Content-Type': 'application/json'})
-    with urlopen(req, timeout=15) as handle:
-        return json.load(handle)['token']
+    try:
+        with urlopen(req, timeout=15) as handle:
+            return json.load(handle)['token']
+    except HTTPError as exc:
+        stage = json.load(exc).get('stage')
+        if stage in {'format', 'claims', 'keys', 'signature', 'run_access', 'run_validation'}:
+            print('GitHub enrollment rejected at: ' + stage, flush=True)
+        raise RuntimeError('enrollment_rejected') from None
 
 
 def request(route, data):
