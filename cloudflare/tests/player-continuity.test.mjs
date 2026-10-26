@@ -15,7 +15,7 @@ function fixture(t,readChat=async()=>({read:true,messages:[]}),extra={}){
  }}};
  const put=(key,value)=>db.prepare('INSERT OR REPLACE INTO bushin_project_state VALUES (?,?,?,?)').run(owner,key,JSON.stringify(value),Date.now());
  const get=key=>JSON.parse(db.prepare('SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?').get(owner,key)?.value_json||'null');
- put('discord2_service_heartbeat_v1',{at:Date.now(),version:3,instance_id:'test-runner'});
+ put('discord2_service_heartbeat_v1',{at:Date.now(),version:4,instance_id:'test-runner'});
  put('discord2_catalog_cache_v7',{at:Date.now(),commands:[{application_id:bot,name:'perfil',options:[{type:1,name:'ver'}]}]});
  const baseUrl='https://example.test',ctx={me:{id:owner,membership:{member:true}}};
  const helpers={baseUrl,reply:(v,s)=>Response.json(v,{status:s}),seal:async x=>x,unseal:async x=>x,normalize:normalizeMessage,readChat,learn:async()=>({initial:false,evidence:[]}),...extra};
