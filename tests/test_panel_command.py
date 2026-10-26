@@ -12,6 +12,23 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class Validation(unittest.TestCase):
+    def test_raw_components_survive_partial_update_and_ignore_other_channels(self):
+        source = ast.parse((ROOT/'scripts/naruto_guarded_mcp.py').read_text())
+        nodes = [n for n in source.body if isinstance(n, ast.ClassDef) and n.name == 'RestrictedClient']
+        env = {'json': json, 'discord': SimpleNamespace(Client=object), 'CHANNEL_ID': 1520114348079583263}
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), '<raw-events>', 'exec'), env)
+        client = env['RestrictedClient']()
+        component = {'type':17, 'components':[{'type':10, 'content':'Missão privada'}]}
+        async def scenario():
+            for kind, data in [('MESSAGE_CREATE', {'id':'1','channel_id':str(env['CHANNEL_ID']), 'components':[component]}),
+                               ('MESSAGE_UPDATE', {'id':'1','channel_id':str(env['CHANNEL_ID']), 'content':''}),
+                               ('MESSAGE_CREATE', {'id':'2','channel_id':'999', 'content':'other'})]:
+                await client.on_socket_raw_receive(json.dumps({'t':kind, 'd':data}))
+            await client.on_socket_raw_receive('invalid json')
+        asyncio.run(scenario())
+        self.assertEqual(client.raw_messages['1']['components'], [component])
+        self.assertNotIn('2', client.raw_messages)
+
     def test_nested_command_and_typed_options(self):
         data = {'command':'/missoes minhas','channel_id':'1520114348079583263','options':{'quantidade':2,'ativo':True}}
         self.assertEqual(module.validate_request(json.dumps(data)),data)
