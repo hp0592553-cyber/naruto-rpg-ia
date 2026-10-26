@@ -18,13 +18,24 @@ def enroll_github():
     oidc_url = os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=' + quote(audience, safe='')
     req = Request(oidc_url, headers={'Authorization': 'Bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
     with urlopen(req, timeout=15) as handle:
-        jwt = json.load(handle)['value']
+        try:
+            jwt = json.load(handle)['value']
+        except (ValueError, KeyError):
+            raise RuntimeError('oidc_response_invalid') from None
     req = Request(audience, data=b'{}', method='POST', headers={'Authorization': 'Bearer ' + jwt, 'Content-Type': 'application/json'})
     try:
         with urlopen(req, timeout=15) as handle:
-            return json.load(handle)['token']
+            try:
+                return json.load(handle)['token']
+            except (ValueError, KeyError):
+                raise RuntimeError('worker_response_invalid') from None
     except HTTPError as exc:
-        stage = json.load(exc).get('stage')
+        print('Enrollment Worker HTTP: ' + str(exc.code), flush=True)
+        try:
+            stage = json.load(exc).get('stage')
+        except ValueError:
+            stage = None
+            print('Enrollment Worker response is not JSON', flush=True)
         if stage in {'format', 'claims', 'keys', 'signature', 'run_access', 'run_validation'}:
             print('GitHub enrollment rejected at: ' + stage, flush=True)
         raise RuntimeError('enrollment_rejected') from None
