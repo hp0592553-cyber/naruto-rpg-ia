@@ -20,7 +20,7 @@ import {personalForumThreads} from "./personal-discord.mjs";
 import {personalListChannels} from "./personal-discord.mjs";
 import {personalInspectCommand,personalInvokeProfileProbe} from "./personal-discord.mjs";
 import {PANEL_HTML,PANEL_JS} from "./discord2-ui.mjs";
-import {commandServiceConfigured,commandServiceMobile,commandServiceRunner} from "./command-service.mjs";
+import {commandServiceSelected,commandServiceMobile,commandServiceRunner,startCommandSession} from "./command-service.mjs";
 import {agentRoute,recordCommandEvidence} from "./rpg-agent.mjs";
 import {gameRoomRoute} from "./game-room.mjs";
 import {autoplayRoute,scheduledAutoplay} from "./autoplay.mjs";
@@ -939,8 +939,9 @@ export default {
           return reply(req.method==="GET"?{state:"blocked",enabled:false,last_result:notice}:{state:"blocked",enabled:false,error:notice},req.method==="GET"?200:409,{"cache-control":"no-store"});
         }
 
+        if(path==="/mobile/discord2/api/ai/command-session")return await startCommandSession(req,env,ctx,base(env));
         if(path==="/mobile/discord2/api/ai/opencode"){
-          if(commandServiceConfigured(env))return await commandServiceMobile(req,env,ctx,{unseal,baseUrl:base(env)});
+          if(await commandServiceSelected(env))return await commandServiceMobile(req,env,ctx,{unseal,baseUrl:base(env)});
           const HEAD={"cache-control":"no-store","x-content-type-options":"nosniff"};
           const owner=String(ctx.me?.id||"");
           const REPO="hp0592553-cyber/naruto-rpg-ia",KEY="bushin_opencode_runner_v1",WF="opencode-projeto.yml";

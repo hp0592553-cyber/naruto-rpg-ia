@@ -1,5 +1,5 @@
 name: Naruto RPG - OpenCode (Projeto)
-run-name: ${{ inputs.mode == 'comando' && format('Discord 2 {0}', inputs.request_id) || 'Naruto RPG - OpenCode' }}
+run-name: ${{ inputs.mode == 'servico' && 'Bushin command session' || inputs.mode == 'comando' && format('Discord 2 {0}', inputs.request_id) || 'Naruto RPG - OpenCode' }}
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         required: true
         default: diagnostico
         type: choice
-        options: [diagnostico, jogar, comando]
+        options: [diagnostico, jogar, comando, servico]
       request_id:
         description: "Identificador do pedido no painel"
         required: false
@@ -25,10 +25,33 @@ permissions:
   contents: read
 
 concurrency:
-  group: naruto-rpg-opencode-${{ github.ref }}
+  group: naruto-rpg-${{ inputs.mode == 'servico' && 'service' || 'opencode' }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  servico:
+    if: github.ref == 'refs/heads/Projeto' && inputs.mode == 'servico'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: Projeto
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: scripts/naruto-panel-requirements.txt
+      - run: python -m pip install --disable-pip-version-check -r scripts/naruto-panel-requirements.txt
+      - name: Testar cliente persistente por até 25 minutos
+        env:
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+          BUSHIN_STATE_DIR: ${{ runner.temp }}/bushin-command-session
+        run: python scripts/command_service.py
   comando:
     permissions:
       contents: read
@@ -66,7 +89,7 @@ jobs:
           RPG_ACTION_MARKER: ${{ runner.temp }}/discord2-command-reserved
         run: .discord2-venv/bin/python scripts/naruto_panel_command.py
   jogar:
-    if: github.ref == 'refs/heads/Projeto' && inputs.mode != 'comando'
+    if: github.ref == 'refs/heads/Projeto' && inputs.mode != 'comando' && inputs.mode != 'servico'
     name: Verificar MCP e acesso autorizado ao Naruto Project
     runs-on: ubuntu-latest
     timeout-minutes: 12

@@ -1,5 +1,20 @@
 # Executor permanente do Discord 2
 
+## Sessão de teste no GitHub
+
+O botão `Conectar sessão` inicia o modo `servico` do workflow existente. Ele mantém
+o cliente vivo por até 25 minutos, dentro de um job limitado a 30 minutos incluindo
+instalação. Não é hospedagem 24 horas e não há reinício automático ou encadeamento
+de jobs. A inicialização continua sujeita à fila do GitHub; depois de conectado,
+vários comandos usam o mesmo cliente. O modo destina-se a testar a integração.
+
+A Secret Discord já existente no GitHub permanece naquele ambiente. O runner
+autentica a ponte usando a identidade OIDC do workflow aprovado e recebe uma
+credencial de sessão temporária, só em memória. O Worker guarda apenas seu hash.
+Não é necessário adicionar `BUSHIN_EXECUTOR_TOKEN` para esse teste. Quando a sessão
+expira, os comandos são recusados como offline, sem iniciar Actions por comando.
+Confira qualquer ação antiga pendente antes de reenviar comandos no transporte novo.
+
 ## Estado
 
 Implementação preparada; não há servidor permanente provisionado nem serviço ativo.

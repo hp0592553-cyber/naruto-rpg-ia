@@ -9,10 +9,23 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 BASE = 'https://bushin-discord-direct.henrique-silva081106.workers.dev'
+SESSION_TOKEN = None
+
+
+def enroll_github():
+    from urllib.parse import quote
+    audience = BASE + '/bridge/commands/enroll'
+    oidc_url = os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=' + quote(audience, safe='')
+    req = Request(oidc_url, headers={'Authorization': 'Bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+    with urlopen(req, timeout=15) as handle:
+        jwt = json.load(handle)['value']
+    req = Request(audience, data=b'{}', method='POST', headers={'Authorization': 'Bearer ' + jwt, 'Content-Type': 'application/json'})
+    with urlopen(req, timeout=15) as handle:
+        return json.load(handle)['token']
 
 
 def request(route, data):
-    token = os.environ['BUSHIN_EXECUTOR_TOKEN']
+    token = SESSION_TOKEN or os.environ['BUSHIN_EXECUTOR_TOKEN']
     req = Request(BASE + '/bridge/commands/' + route, data=json.dumps(data).encode(),
                   headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, method='POST')
     try:
@@ -78,8 +91,15 @@ async def execute_job(executor, job, state_dir):
 
 
 async def main():
+    global SESSION_TOKEN
     import naruto_guarded_mcp as executor
-    if not os.environ.get('DISCORD_USER_TOKEN') or len(os.environ.get('BUSHIN_EXECUTOR_TOKEN', '')) < 43:
+    github = bool(os.environ.get('ACTIONS_ID_TOKEN_REQUEST_URL'))
+    if github:
+        try:
+            SESSION_TOKEN = await asyncio.to_thread(enroll_github)
+        except Exception:
+            raise SystemExit('GitHub session authorization failed; nothing sent') from None
+    if not os.environ.get('DISCORD_USER_TOKEN') or len(SESSION_TOKEN or os.environ.get('BUSHIN_EXECUTOR_TOKEN', '')) < 43:
         raise SystemExit('Service credentials missing; nothing sent')
     state_dir = Path(os.environ.get('BUSHIN_STATE_DIR', '/var/lib/bushin-command-service'))
     state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -92,7 +112,8 @@ async def main():
         if connected.get('status') != 'connected':
             raise SystemExit('Discord connection unavailable; nothing sent')
         print('Command service connected', flush=True)
-        while executor.client.is_ready():
+        deadline = asyncio.get_running_loop().time() + (25*60 if github else 365*24*3600)
+        while executor.client.is_ready() and asyncio.get_running_loop().time() < deadline:
             try:
                 result = await asyncio.to_thread(request, 'poll', {'owner_id': str(executor.client.user.id), 'ready': True})
             except RuntimeError:
