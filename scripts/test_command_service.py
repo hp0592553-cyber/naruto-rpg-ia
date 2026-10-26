@@ -43,7 +43,7 @@ class CommandServiceTests(unittest.IsolatedAsyncioTestCase):
 
         def request(route, data):
             self.assertEqual(route, 'heartbeat')
-            self.assertEqual(data['version'], 3)
+            self.assertEqual(data['version'], 4)
             self.assertEqual(data['instance_id'], service.INSTANCE_ID)
             loop.call_soon_threadsafe(pulse.set)
             return {'saved':True}
