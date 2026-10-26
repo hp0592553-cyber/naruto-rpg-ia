@@ -16,7 +16,7 @@ export const AUTOPLAY_HTML=String.raw`
  </div>
 </section>`;
 export const AUTOPLAY_JS=String.raw`
-let autoplayData=null,autoplayControlBusy=false,autoplayTickBusy=false,autoplayPollingFailed=false,autoplayShownOperation=null,autoplayShownReply=null;
+let autoplayData=null,autoplayControlBusy=false,autoplayTickBusy=false,autoplayPollingFailed=false,autoplayShownOperation=null,autoplayShownReply=null,autoplaySiteAction=null;
 function renderAutoplay(data){
  if(!data?.state||autoplayData?.state?.revision>data.state.revision)return;
  autoplayData=data;const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
@@ -42,6 +42,8 @@ function renderAutoplay(data){
  if(s.phase==="blocked"&&/não confirmou o resultado|não há caixa própria confirmada/i.test(s.reason||"")){E("gameToolbox").hidden=true;E("autoplayStatus").textContent="Pausado · A última interação não teve resposta confirmada. Nenhum clique será repetido.";}
  if(s.last_chat_reply&&s.last_chat_reply.id!==autoplayShownReply){const sent=s.last_chat_reply;autoplayShownReply=sent.id;if(S.current===sent.channel_id&&!S.messages.some(m=>m.id===sent.id)){S.messages.push({id:sent.id,channel_id:sent.channel_id,author_id:s.owner_id,author_name:"Henrique",content:sent.text,timestamp:new Date().toISOString()});render("keep");}}
  const active=["running","waiting","confirming"].includes(s.phase);
+ if(active&&s.site_action?.type==="channel"&&s.site_action.id!==autoplaySiteAction&&S.channels.some(c=>c.id===s.site_action.channel_id)){autoplaySiteAction=s.site_action.id;if(S.current!==s.site_action.channel_id)select(s.site_action.channel_id).catch(e=>status("Não foi possível abrir o canal: "+e.message,true));}
+
  E("autoplayStart").disabled=autoplayControlBusy||active;E("autoplayResume").disabled=autoplayControlBusy||active||!s.run_id;
  E("autoplayPause").disabled=autoplayControlBusy||["stopped","paused"].includes(s.phase);E("autoplayStop").disabled=autoplayControlBusy||s.phase==="stopped";
  E("autoplayReview").disabled=autoplayControlBusy||!s.pending;

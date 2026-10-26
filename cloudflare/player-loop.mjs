@@ -80,6 +80,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   const staleBox=!!stored?.response?.controls?.length&&!fresh;
   const last=fresh?currentResponse.response:null;
   const controls=(last?.controls||[]).filter(c=>!c.disabled&&!c.url&&[2,3].includes(c.type));
+  available.push({command:'/navigate',description:'Selecionar e ler outro canal acessível no site, sem enviar mensagem.',options:[]});
   if(controls.length)available.push({command:'/component',description:'Usar somente uma das caixas da última resposta própria',options:[{name:'message_id',type:3,required:true},{name:'custom_id',type:3,required:true},{name:'values',type:3,required:true}]});
   const seed=['/perfil ver','/missoes minhas','/missoes ativas'].find(x=>!saved.state.completed_keys.includes(x)&&available.some(c=>c.command===x));
   let selected=seed?{command:seed,options:{},channel_id:CHANNEL}:null;
@@ -118,7 +119,11 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   for(const [name,value] of Object.entries(options))if(!['string','boolean','number'].includes(typeof value))throw Error('Parâmetro não é simples em '+selected.command+': '+name);
   // Recheck the owner stop/revision after inference, immediately before queueing.
   const current=(await readAutoplay(env,owner)).state;if(current.run_id!==run||current.lease?.id!==lock||current.phase==='stopped')return reply(view(current),200,HEAD);
+  if(selected.command==='/navigate'){
+   if(selected.channel_id===contextChannel)throw Error('Este canal já está selecionado.');
+   const next=await commit(d=>{d.context_channel_id=selected.channel_id;d.site_action={id:crypto.randomUUID(),type:'channel',channel_id:selected.channel_id};d.steps++;d.reason='Canal selecionado. Lendo o contexto antes da próxima ação.';d.next_tick_at=Date.now()+1500;recordAutoplay(d,'channel_selected',selected.channel_id)});return reply(view(next.state),200,HEAD);
+  }
   const result=await service({action:'start',command_request:{command:selected.command,channel_id:selected.channel_id,options:selected.options||{}}});
-  const next=await commit(d=>{d.refresh_menu=false;if(selected.component_key)d.completed_components=(d.completed_components||[]).concat(selected.component_key).slice(-100);d.pending={id:result.request_id,action:{label:selected.command,command:selected.command,channel_id:selected.channel_id},stages:{requested:true,sent:false}};d.phase='confirming';d.reason='Executando '+selected.command;d.next_tick_at=Date.now()+2000;recordAutoplay(d,'requested',selected.command)});if(!next.changed){try{await service({action:'stop'})}catch{}}return reply(view(next.state),200,HEAD);
+  const next=await commit(d=>{d.context_channel_id=selected.channel_id;d.site_action={id:result.request_id,type:'channel',channel_id:selected.channel_id};d.refresh_menu=false;if(selected.component_key)d.completed_components=(d.completed_components||[]).concat(selected.component_key).slice(-100);d.pending={id:result.request_id,action:{label:selected.command,command:selected.command,channel_id:selected.channel_id},stages:{requested:true,sent:false}};d.phase='confirming';d.reason='Executando '+selected.command;d.next_tick_at=Date.now()+2000;recordAutoplay(d,'requested',selected.command)});if(!next.changed){try{await service({action:'stop'})}catch{}}return reply(view(next.state),200,HEAD);
  }catch(e){const next=await commit(d=>{d.phase='blocked';d.code='player_paused';d.reason=String(e.message).slice(0,300);d.next_tick_at=0});return reply(view(next.state),200,HEAD)}
 }
