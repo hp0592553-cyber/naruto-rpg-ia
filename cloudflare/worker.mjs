@@ -20,6 +20,7 @@ import {personalForumThreads} from "./personal-discord.mjs";
 import {personalListChannels} from "./personal-discord.mjs";
 import {personalInspectCommand,personalInvokeProfileProbe} from "./personal-discord.mjs";
 import {PANEL_HTML,PANEL_JS} from "./discord2-ui.mjs";
+import {commandServiceConfigured,commandServiceMobile,commandServiceRunner} from "./command-service.mjs";
 import {agentRoute,recordCommandEvidence} from "./rpg-agent.mjs";
 import {gameRoomRoute} from "./game-room.mjs";
 import {autoplayRoute,scheduledAutoplay} from "./autoplay.mjs";
@@ -939,6 +940,7 @@ export default {
         }
 
         if(path==="/mobile/discord2/api/ai/opencode"){
+          if(commandServiceConfigured(env))return await commandServiceMobile(req,env,ctx,{unseal,baseUrl:base(env)});
           const HEAD={"cache-control":"no-store","x-content-type-options":"nosniff"};
           const owner=String(ctx.me?.id||"");
           const REPO="hp0592553-cyber/naruto-rpg-ia",KEY="bushin_opencode_runner_v1",WF="opencode-projeto.yml";
@@ -1059,6 +1061,7 @@ export default {
         if(!row)return mGo("/mobile");
         return await visualMobile(req,env,{ownerId:row.user_id,escape:mEsc,page:mPage,redirect:mGo,base:ready(env)});
       }
+      if(path.startsWith("/bridge/commands/"))return await commandServiceRunner(req,env,{seal,normalize:normalizeMessage});
       if(path.startsWith("/bridge/runner/"))return await visualRunner(req,env,{seal:v=>seal(v,env)});
       if(path==="/mobile/workspace"&&["GET","POST"].includes(req.method))return await mobileWorkspace(req,env);
       if(path==="/mobile/servers"&&req.method==="GET")return await mobileServers(req,env);

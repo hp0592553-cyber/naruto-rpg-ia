@@ -1,0 +1,25 @@
+[Unit]
+Description=Bushin persistent Discord 2 command executor
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=bushin
+Group=bushin
+WorkingDirectory=/opt/bushin
+EnvironmentFile=/etc/bushin/command-service.env
+Environment=BUSHIN_STATE_DIR=/var/lib/bushin-command-service
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/bushin/.venv/bin/python scripts/command_service.py
+Restart=on-failure
+RestartSec=10
+StateDirectory=bushin-command-service
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
