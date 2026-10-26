@@ -78,13 +78,14 @@ async function controlAutoplay(action,goal){
   catch(e){autoplayPollingFailed=true;stopError="Parada não confirmada: "+e.message;return null;}
   finally{autoplayStopBusy=false;if(autoplayData)renderAutoplay(autoplayData);if(stopError)E("autoplayStatus").textContent=stopError;}
  }
- if(autoplayControlBusy||autoplayStopBusy)return null;autoplayControlBusy=true;let failedNotice=null;
+ if(autoplayControlBusy||autoplayStopBusy)return null;autoplayControlBusy=true;let failedNotice=null,requestedRevision=null;
  if(autoplayData)renderAutoplay(autoplayData);
  try{
   const current=await refreshAutoplay();if(!current)throw Error("Estado indisponível");
+  requestedRevision=current.state.revision;
   const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action,revision:current.state.revision,...(action==="start"||action==="resume"?{goal:goal||E("autoplayGoal").value,channel_id:S.current}:{})})});
   renderAutoplay(data);autoplayPollingFailed=false;return data;
- }catch(e){await refreshAutoplay();failedNotice="Pedido não concluído: "+e.message;return null;}
+ }catch(e){const latest=await refreshAutoplay();if(!(latest?.state?.phase==="stopped"&&requestedRevision!==null&&latest.state.revision>requestedRevision))failedNotice="Pedido não concluído: "+e.message;return null;}
  finally{autoplayControlBusy=false;if(autoplayData)renderAutoplay(autoplayData);if(failedNotice)E("autoplayStatus").textContent=failedNotice;}
 }
 async function autoplayTick(){
