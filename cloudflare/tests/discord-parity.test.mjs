@@ -32,7 +32,7 @@ test('all Discord timestamp formats render without raw syntax, invalid range sta
 });
 test('buttons from other bots are visible without sending an interaction',()=>{
  const c=fixture(),host=new Element();c.gameControls(host,{author_id:'123456789012345678',components:[{type:1,components:[{type:2,label:'Quick Sell',custom_id:'sell',style:1}]}]});
- assert.match(text(host),/Quick Sell/);const group=host.children.find(e=>e.className==='gameActions');assert.equal(group.children[0].href,'https://discord.com/channels/1/2/3');
+ assert.match(text(host),/Quick Sell/);const group=host.children.find(e=>e.className==='gameActions');assert.equal(group.children[0].href,undefined);assert.equal(group.children[0].attrs['aria-disabled'],'true');
 });
 test('link buttons preserve HTTPS destination and disabled/unsafe links are inert',()=>{
  const c=fixture();assert.equal(c.componentLink({style:5,url:'https://example.com/game'},{}),'https://example.com/game');

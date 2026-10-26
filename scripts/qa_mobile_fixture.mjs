@@ -24,7 +24,7 @@ window.fetch=async(input,options={})=>{
    state={...state,phase:'waiting',steps:state.steps+1,reason:'Resposta sintética recebida. Sem jogada real.',revision:state.revision+1,next_tick_at:Date.now()+60000,last_result:{operation_id:'qa-operation',at:Date.now(),response:{id:'999999999999999998',message_id:'999999999999999998',channel_id:channel,author_id:'1515908078913192026',author_name:'Naruto Bot · fixture',normalized_text:'QA sintético: botão na conversa normal.',content:'QA sintético: botão na conversa normal.',embeds:[],components:[],controls:[{type:2,custom_id:'qa-only',label:'Interação sintética'}]}}};
   }
   value={state:structuredClone(state),integration:{configured:true,missing:[]},note:'QA sintético; não é resultado do jogo.'};
- }else if(path==='/ai/opencode')value=body?{submitted:true,request_id:'qa-component',confirmed:false}:{state:'idle',confirmed:false};
+ }else if(path==='/ai/opencode')value=body?{submitted:true,request_id:'qa-component',confirmed:false}:state.last_result?{state:'finished',confirmed:true,controls_current:true,response:state.last_result.response}:{state:'idle',confirmed:false};
  return Response.json(value);
 };
 `;
