@@ -51,12 +51,12 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal}){
    const next=await commit(d=>{d.steps++;d.completed_keys.push(pending.action.command);d.player_observations=(d.player_observations||[]).concat([{command:pending.action.command,channel_id:result.response.channel_id,text:result.response.normalized_text||result.response.content||'',controls:result.response.controls||[]}]).slice(-8);d.last_result={operation_id:pending.id,at:Date.now(),response:result.response};d.pending=null;d.phase='running';d.reason='Resposta recebida. Escolhendo a próxima ação.';d.next_tick_at=Date.now()+1500;recordAutoplay(d,'confirmed',pending.action.command)});return reply(view(next.state),200,HEAD);
   }
   if(!(await commandServiceHealth(env)).online){const next=await commit(d=>{d.phase='waiting';d.reason='Executor desconectado. Nenhum comando enviado.';d.next_tick_at=Date.now()+5000});return reply(view(next.state),200,HEAD)}
-  const arrival=travelArrival(saved.state.last_result?.response?.normalized_text);
+  const arrival=travelArrival(saved.state.last_result?.response?.normalized_text)||(saved.state.player_observations||[]).map(x=>travelArrival(x.text)).filter(Boolean).at(-1);
   if(arrival&&Date.now()<arrival+5000){const next=await commit(d=>{d.phase='waiting';d.reason='Viagem confirmada. Aguardando a chegada informada pelo jogo.';d.next_tick_at=arrival+5000});return reply(view(next.state),200,HEAD)}
   if(saved.state.steps>=12)throw Error('Limite de ações desta sessão atingido.');
   const registry=await personalInspectCommand(env,{channel_id:CHANNEL,command:'/perfil ver'},ctx);
   if(!registry.catalog_verified||registry.stale)throw Error('Catálogo de comandos não confirmado.');
-  const available=playerCommands(registry.commands).filter(x=>!saved.state.completed_keys.includes(x.command)||['/viajar','/acao coletar'].includes(x.command));
+  const available=playerCommands(registry.commands).filter(x=>!saved.state.completed_keys.includes(x.command)||['/viajar','/acao coletar','/mapa'].includes(x.command));
   const last=saved.state.last_result?.response;
   const controls=(last?.controls||[]).filter(c=>!c.disabled&&!c.url&&[2,3].includes(c.type));
   if(controls.length)available.push({command:'/component',description:'Usar somente uma das caixas da última resposta própria',options:[{name:'message_id',type:3,required:true},{name:'custom_id',type:3,required:true},{name:'values',type:3,required:true}]});
@@ -71,7 +71,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal}){
    const gate=channels.find(c=>key(c.name).includes('portao')&&key(c.name).includes('konoha'));
    const refused=context.some(x=>x.command==='/viajar'&&/viagem indisponível|canais permitidos/i.test(x.text));
    const menu=forestControl(controls);
-   if(arrival&&!saved.state.completed_keys.includes('/mapa')&&available.some(c=>c.command==='/mapa')){if(!forest)throw Error('A chegada ainda não liberou o canal da Floresta. Aguarde o jogo atualizar seus cargos.');selected={command:'/mapa',options:{},channel_id:forest.id};}
+   if(arrival&&available.some(c=>c.command==='/mapa')&&!(saved.state.player_observations||[]).some(x=>x.command==='/mapa'&&forest&&x.channel_id===forest.id)){if(!forest)throw Error('A chegada ainda não liberou o canal da Floresta. Aguarde o jogo atualizar seus cargos.');selected={command:'/mapa',options:{},channel_id:forest.id};}
    else if(gate&&(saved.state.refresh_menu||refused&&!context.some(x=>x.command==='/viajar'&&x.channel_id===gate.id)))selected={command:'/viajar',options:{},channel_id:gate.id};
    else if(menu){selected={command:'/component',channel_id:last.channel_id,options:{message_id:last.message_id,custom_id:menu.control.custom_id,values:JSON.stringify(menu.values)}};}
    else{
