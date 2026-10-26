@@ -55,7 +55,7 @@ jobs:
       - name: Testar cliente persistente por até 25 minutos
         env:
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
-          RPG_MODEL: ${{ vars.RPG_MODEL || 'opencode/big-pickle' }}
+          RPG_MODEL: ${{ vars.RPG_MODEL || 'opencode/glm-5.3-flash-free' }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           BUSHIN_STATE_DIR: ${{ runner.temp }}/bushin-command-session
