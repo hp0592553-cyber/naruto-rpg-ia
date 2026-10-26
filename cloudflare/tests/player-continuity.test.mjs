@@ -18,7 +18,7 @@ function fixture(t,readChat=async()=>({read:true,messages:[]}),extra={}){
  put('discord2_service_heartbeat_v1',{at:Date.now(),version:3,instance_id:'test-runner'});
  put('discord2_catalog_cache_v7',{at:Date.now(),commands:[{application_id:bot,name:'perfil',options:[{type:1,name:'ver'}]}]});
  const baseUrl='https://example.test',ctx={me:{id:owner,membership:{member:true}}};
- const helpers={baseUrl,reply:(v,s)=>Response.json(v,{status:s}),seal:async x=>x,unseal:async x=>x,normalize:normalizeMessage,readChat,...extra};
+ const helpers={baseUrl,reply:(v,s)=>Response.json(v,{status:s}),seal:async x=>x,unseal:async x=>x,normalize:normalizeMessage,readChat,learn:async()=>({initial:false,evidence:[]}),...extra};
  const call=async data=>(await playerRoute(new Request(baseUrl+'/mobile/discord2/api/autoplay',data?{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify(data)}:{}),env,ctx,helpers)).json();
  const runner=async(path,data)=>(await commandServiceRunner(new Request(baseUrl+'/bridge/commands/'+path,{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify(data)}),env,helpers)).json();
  return {env,call,runner,put,get};
