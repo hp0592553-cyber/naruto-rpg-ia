@@ -9,7 +9,7 @@ function fixture(t,readChat=async()=>({read:true,messages:[]}),extra={}){
  const db=new DatabaseSync(':memory:');t.after(()=>db.close());
  db.exec('CREATE TABLE bushin_project_state (owner_id TEXT,key TEXT,value_json TEXT,updated_at INTEGER,PRIMARY KEY(owner_id,key))');
  const token='synthetic-executor-token-for-tests-only-123456789';
- const env={BUSHIN_OWNER_DISCORD_ID:owner,BUSHIN_EXECUTOR_TOKEN:token,DB:{prepare(sql){
+ const env={BUSHIN_OWNER_DISCORD_ID:owner,DISCORD_USER_TOKEN:'synthetic-personal-credential-for-tests-only-123456789',BUSHIN_EXECUTOR_TOKEN:token,DB:{prepare(sql){
   let args;
   return {bind(...v){args=v;return this},async first(){return db.prepare(sql).get(...args)||null},async run(){return {meta:db.prepare(sql).run(...args)}}};
  }}};
@@ -38,6 +38,14 @@ test('real SQLite: player command is claimed once, Stop wins before the send gra
  await f.call({action:'stop',revision:0});
  assert.equal((await f.runner('authorize',{request_id:id})).authorized,false);
  assert.equal((await f.runner('poll',{owner_id:owner,ready:true,version:3,instance_id:'test-runner'})).job,null);
+});
+test('review after Stop confirms a late result by ID without restarting or sending another action',async t=>{
+ const f=fixture(t);let r=await f.call();r=await f.call({action:'start',revision:r.state.revision});r=await f.call({action:'tick',revision:r.state.revision});
+ const pending=r.state.pending,job=f.get('discord2_service_job_v1');r=await f.call({action:'stop',revision:r.state.revision});
+ f.put('discord2_service_job_v1',{...job,phase:'finished',confirmed:true,sealed:{response:{id:'1564380277411680326',message_id:'1564380277411680326',author_id:bot,channel_id:channel,interaction_metadata:{user_id:owner},embeds:[{fields:[{name:'Nível',value:'11'},{name:'XP',value:'332 / 970'}]}]}}});
+ r=await f.call({action:'review',revision:r.state.revision});
+ assert.equal(r.state.phase,'stopped');assert.equal(r.state.pending,null);assert.equal(r.state.steps,1);assert.equal(r.state.snapshot.stats.level,11);assert.equal(r.state.last_result.operation_id,pending.id);assert.equal(r.state.last_operation.stages.response_captured,true);assert.equal(r.state.last_operation.stages.game_state_confirmed,true);
+ const again=await f.call({action:'review',revision:r.state.revision});assert.equal(again.state.steps,1);assert.equal(f.get('discord2_service_job_v1').request_id,pending.id);
 });
 test('real SQLite: level target only completes from a correlated explicit profile field',async t=>{
  const f=fixture(t);let r=await f.call();r=await f.call({action:'start',revision:r.state.revision});r=await f.call({action:'tick',revision:r.state.revision});

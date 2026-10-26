@@ -1,6 +1,10 @@
 /** Authorized observe → decide → dispatch once → confirm → persist controller. */
 import {createGameAdapter,gameConfiguration,boundedJson,GameIntegrationError} from './game-adapter.mjs';
-import {readAutoplay,changeAutoplay,recordAutoplay} from './autoplay-store.mjs';
+import {readAutoplay as readState,changeAutoplay as changeState,recordAutoplay,AUTHORIZED_AUTOPLAY_KEY} from './autoplay-store.mjs';
+// Never interpret a legacy command-service pending ID as an authorized game action.
+export const readAuthorizedAutoplay=(env,owner)=>readState(env,owner,{key:AUTHORIZED_AUTOPLAY_KEY});
+export const changeAuthorizedAutoplay=(env,owner,mutate,options={})=>changeState(env,owner,mutate,{...options,key:AUTHORIZED_AUTOPLAY_KEY});
+const readAutoplay=readAuthorizedAutoplay,changeAutoplay=changeAuthorizedAutoplay;
 import {normalizeMessage} from './message-normalizer.mjs';
 const HEAD={'cache-control':'no-store','x-content-type-options':'nosniff'};
 const ACTIVE=new Set(['running','waiting','confirming']);
@@ -10,9 +14,9 @@ const short=(v,n=500)=>typeof v==='string'?v.trim().slice(0,n):'';
 const failure=(code,message)=>new GameIntegrationError(code,message);
 function publicView(state,env){
  const configuration=gameConfiguration(env),{lease,completed_keys,...visible}=state;
- return {state:{...visible,pending:state.pending?{id:state.pending.id,action:state.pending.action,stages:state.pending.stages,uncertain:state.pending.uncertain===true}:null},
+  return {state:{...visible,last_result:state.last_result?{...state.last_result,response:state.last_result.response?{...state.last_result.response,authorized_game:true}:null}:null,pending:state.pending?{id:state.pending.id,action:state.pending.action,stages:state.pending.stages,uncertain:state.pending.uncertain===true}:null},
   integration:configuration,model:'Llama 3.1 — Cloudflare',background_execution:configuration.scheduler_enabled&&configuration.configured,
-  adapter_configured:configuration.configured,authorization_check:'before_each_action',automatic_actions_verified:state.steps,
+   controller:'authorized_game',adapter_configured:configuration.configured,authorization_check:'before_each_action',automatic_actions_verified:state.steps,
   note:configuration.scheduler_enabled?'Agendador habilitado por configuração; depende de Cron Trigger instalado.':'Continuação automática pela página aberta. Estado persistido; Cron não ativado.'};
 }
 function errorCode(e){return e instanceof GameIntegrationError?e.code:'autoplay_internal_error';}
@@ -113,7 +117,7 @@ export async function advanceAutoplay(env,owner,{now=()=>Date.now(),decide=choos
   const observation=await adapter.observe(grant);
   const observed=await changeAutoplay(env,owner,d=>{
    if(d.lease?.token!==token||!active(d))return null;
-   d.snapshot=cloneSnapshot(observation);d.code=null;d.cycle_stage='deciding';d.reason='Estado recebido. IA escolhendo a próxima ação segura.';
+    d.snapshot=cloneSnapshot(observation);d.site_action={id:observation.revision,type:'channel',channel_id:observation.channel_id};d.code=null;d.cycle_stage='deciding';d.reason='Estado recebido. IA escolhendo a próxima ação segura.';
    if(observation.stats.level!==null&&observation.stats.level>=d.goal_level){d.phase='completed';d.lease=null;d.reason='Meta de nível '+d.goal_level+' já confirmada pelo jogo.';}
    return recordAutoplay(d,'observed','Estado '+observation.revision+' · canal '+observation.channel_id,now());
   },{now});

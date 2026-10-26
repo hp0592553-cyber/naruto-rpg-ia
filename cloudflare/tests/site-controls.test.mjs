@@ -15,6 +15,12 @@ test('old inline controls stay disabled and never submit or redirect to Discord'
  c.add({append:n=>nodes.push(n)},{message_id:'old',channel_id:'456'},{type:2,custom_id:'old-button',label:'Antigo'});
  await nodes[0].onclick();await nodes[0].onclick();assert.deepEqual(requests,['GET']);assert.equal(nodes[0].disabled,true);assert.equal(nodes[0].href,undefined);
 });
+test('authorized adapter controls never fall back to the personal component executor',()=>{
+ const nodes=[];const c=vm.createContext({document:{createElement:tag=>({tag})},req(){throw Error('Personal executor must not be called');}});
+ const a=PANEL_JS.indexOf('function appendOwnGameControl'),b=PANEL_JS.indexOf('function renderGameToolbox',a);vm.runInContext(PANEL_JS.slice(a,b)+';this.add=appendOwnGameControl;',c);
+ c.add({append:n=>nodes.push(n)},{message_id:'123',channel_id:'456',authorized_game:true},{type:2,custom_id:'adapter-button',label:'Continuar'});
+ assert.equal(nodes.length,1);assert.equal(nodes[0].tag,'p');assert.equal(nodes[0].onclick,undefined);assert.match(nodes[0].textContent,/ações autorizadas do adaptador/);
+});
 test('site navigation follows a new allowed action once and never moves while stopped',()=>{
  const calls=[],s={phase:'running',site_action:{id:'operation',type:'channel',channel_id:'forest'}};const c=vm.createContext({s,S:{current:'commands',channels:[{id:'forest'}]},autoplaySiteAction:null,select:id=>{calls.push(id);return Promise.resolve()},status(){}});
  const a=AUTOPLAY_JS.indexOf(' const active='),b=AUTOPLAY_JS.indexOf(' E("autoplayStart")',a),code='{'+AUTOPLAY_JS.slice(a,b)+'}';vm.runInContext(code,c);vm.runInContext(code,c);assert.deepEqual(calls,['forest']);s.phase='stopped';s.site_action.id='next';vm.runInContext(code,c);assert.equal(calls.length,1);

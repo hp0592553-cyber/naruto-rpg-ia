@@ -20,6 +20,7 @@ import {personalForumThreads} from "./personal-discord.mjs";
 import {personalListChannels} from "./personal-discord.mjs";
 import {personalInspectCommand,personalInvokeProfileProbe} from "./personal-discord.mjs";
 import {PANEL_HTML,PANEL_JS} from "./discord2-ui.mjs";
+import {parseMobileMessage,deliverMobileMessage,mobileDeliveryReceipt,MobileMessageError} from "./mobile-message.mjs";
 import {commandServiceSelected,commandServiceMobile,commandServiceRunner,startCommandSession} from "./command-service.mjs";
 import {agentRoute,recordCommandEvidence} from "./rpg-agent.mjs";
 import {gameRoomRoute} from "./game-room.mjs";
@@ -921,6 +922,7 @@ export default {
         }
         if(path==="/mobile/discord2/api/search/mine"&&req.method==="POST")return await searchHenriqueMessages(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/ai/scan"&&req.method==="POST")return await scanRpgChannels(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
+        if(path==="/mobile/discord2/api/autoplay/authorized")return autoplayRoute(req,env,ctx,{reply,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/autoplay")return playerRoute(req,env,ctx,{reply,baseUrl:base(env),seal,unseal,listChannels:async()=>{
           // Read membership again after travel; the initial mobile session is not a role snapshot.
           const auth=await unseal(row.creds_encrypted,env);
@@ -983,16 +985,18 @@ export default {
           if(req.method==="GET"){
             const st=await getState();
             if(!st)return reply({state:"idle",executed:false,confirmed:false,note:"Nenhuma execução solicitada."},200,HEAD);
+            const requestedId=new URL(req.url).searchParams.get("request_id");
+            if(requestedId&&st.request_id!==requestedId)return reply({state:"unknown",request_id:requestedId,executed:false,confirmed:false,note:"Resultado deste pedido não está disponível neste executor. Nenhum reenvio foi feito."},200,HEAD);
             let captured=null;
             if(st?.request_id){try{
              const saved=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(owner,"discord2-private:"+st.request_id).first();
              if(saved)captured=await unseal(JSON.parse(saved.value_json).sealed,env);
             }catch{}}
-            if(captured)return reply({state:"finished",command:st.command,requested_at:st.at,executed:true,confirmed:true,response:captured.response,note:"Resposta do Naruto Bot recebida e disponível no painel."},200,HEAD);
+            if(captured)return reply({state:"finished",request_id:st.request_id,command:st.command,requested_at:st.at,executed:true,confirmed:true,response:captured.response,note:"Resposta do Naruto Bot recebida e disponível no painel."},200,HEAD);
             const runs=await getRuns();if(!runs.ok)return reply({state:"unavailable",error:runs.error,upstream_status:runs.status,requested_at:st?.at,executed:false,confirmed:false},503,HEAD);
             const r=candidate(runs.data?.workflow_runs||[],st);
-            if(!r)return reply({state:st.phase||"requested",requested_at:st.at,run:null,executed:false,confirmed:false,note:"GitHub pode demorar a listar um workflow recém-solicitado."},200,HEAD);
-            return reply({state:r.status==="completed"?"finished":r.status,run:publicRun(r),requested_at:st.at,command:st.command,executed:st.mode==="comando"&&r.conclusion==="success",confirmed:false,response_captured_by_executor:st.mode==="comando"&&r.conclusion==="success",response_delivered:false,
+            if(!r)return reply({state:st.phase||"requested",request_id:st.request_id,requested_at:st.at,run:null,executed:false,confirmed:false,note:"GitHub pode demorar a listar um workflow recém-solicitado."},200,HEAD);
+            return reply({state:r.status==="completed"?"finished":r.status,request_id:st.request_id,run:publicRun(r),requested_at:st.at,command:st.command,executed:st.mode==="comando"&&r.conclusion==="success",confirmed:false,response_captured_by_executor:st.mode==="comando"&&r.conclusion==="success",response_delivered:false,
               note:st.mode==="comando"&&r.status==="completed"?(r.conclusion==="success"?"O executor capturou uma resposta, mas a entrega da caixa ao painel não foi confirmada. Consulte novamente, sem repetir o comando.":"Execução sem resposta comprovada. Consulte o registro do executor; não reenvie automaticamente."):r.status==="completed"?"Workflow finalizado. Confira o artefato naruto-jogada-tentativa para confirmar ação e resposta, não somente a conclusão do GitHub.":"Workflow "+String(r.status)+"; nenhuma jogada comprovada ainda."},200,HEAD);
           }
           if(req.method!=="POST")return reply({error:"Método não permitido"},405,HEAD);
@@ -1037,6 +1041,11 @@ export default {
           const result=await personalInvokeProfileProbe(env,ctx);
           return reply(result,result.submitted===true?200:result.state==="unknown"?202:422,headers);
         }
+        const delivery=path.match(/^\/mobile\/discord2\/api\/channels\/([0-9]{15,22})\/messages\/receipt$/);
+        if(delivery&&req.method==="GET"){
+          try{return reply(await mobileDeliveryReceipt(env,ctx,delivery[1],new URL(req.url).searchParams.get("request_id")),200,headers);}
+          catch(e){return reply({error:e instanceof MobileMessageError?e.message:"Recibo indisponível."},e.status||503,headers);}
+        }
         const m=path.match(/^\/mobile\/discord2\/api\/channels\/([0-9]{15,22})\/messages$/);
         if(m){
           const channel_id=m[1];
@@ -1048,17 +1057,11 @@ export default {
           }
           if(req.method==="POST"){
             if(req.headers.get("origin")!==base(env))return reply({error:"Origem inválida"},403,headers);
-            if(!(req.headers.get("content-type")||"").startsWith("application/json"))return reply({error:"Tipo inválido"},415,headers);
-            const raw=await req.text();
-            if(raw.length>1400)return reply({error:"Mensagem grande demais"},413,headers);
-            let data;try{data=JSON.parse(raw)}catch{return reply({error:"JSON inválido"},400,headers)}
-            if(data?.confirmed!==true||typeof data?.content!=="string")return reply({error:"Confirmação ausente"},400,headers);
-            const mentionIds=Array.isArray(data.mention_ids)?data.mention_ids:[];
-            if(mentionIds.length>5||!mentionIds.every(id=>/^[0-9]{15,22}$/.test(String(id))&&data.content.includes("<@"+id+">")))return reply({error:"Marcações inválidas"},400,headers);
-            const replyId=data.reply_to===undefined?null:String(data.reply_to);
-            if(replyId!==null&&!/^[0-9]{15,22}$/.test(replyId))return reply({error:"Resposta inválida"},400,headers);
-            const r=await personalCall(env,"bushin_naruto_personal_send",{channel_id,text:data.content,confirmed:true,mention_ids:mentionIds,...(replyId?{reply_to:replyId}:{})},ctx);
-            return reply(r,r.sent?200:r.state==="unknown"?202:r.code===429?429:422,{...headers,...(r.retry_after_seconds?{"retry-after":String(r.retry_after_seconds)}:{})});
+            try{
+              const parsed=await parseMobileMessage(req);
+              const r=await deliverMobileMessage(env,ctx,channel_id,parsed,{send:personalCall});
+              return reply(r,r.sent?200:r.state==="unknown"?202:r.code===429?429:422,{...headers,...(r.retry_after_seconds?{"retry-after":String(r.retry_after_seconds)}:{})});
+            }catch(e){return reply({error:e instanceof MobileMessageError?e.message:"Não foi possível confirmar o envio. Consulte o recibo antes de repetir."},e.status||503,headers);}
           }
         }
         return reply({error:"Rota não encontrada"},404,headers);
@@ -1117,4 +1120,3 @@ export default {
     }catch(e){return oauthReply(e);}
   }
 };
-

@@ -6,14 +6,15 @@ export const AUTOPLAY_HTML=String.raw`
   <button type="button" id="autoplayStop">⏹ Parar</button>
  </div>
  <p id="autoplayStatus" class="hint" role="status" aria-live="polite">Conferindo o jogador…</p>
- <div hidden inert>
+  <details class="playerEvidence" id="autoplayEvidence">
+   <summary>Estado, resultados e bloqueios</summary>
   <textarea id="autoplayGoal">Jogar Naruto Project até o nível 20.</textarea>
   <button id="autoplayPause">Pausar</button><button id="autoplayResume">Continuar</button>
   <button id="autoplayReview">Conferir</button><button id="autoplayRefresh">Atualizar</button>
   <div id="autoplayStats"></div><div id="autoplayAction"></div><div id="autoplayStages"></div>
   <div id="autoplayResult"></div><div id="autoplayPersistence"></div><div id="autoplayHistory"></div>
-  <details id="autoplayMissing"><p id="autoplayIntegration"></p></details>
- </div>
+   <details id="autoplayMissing"><summary>Conexão e requisitos</summary><p id="autoplayIntegration"></p></details>
+  </details>
 </section>`;
 export const AUTOPLAY_JS=String.raw`
 let autoplayData=null,autoplayControlBusy=false,autoplayStopBusy=false,autoplayTickBusy=false,autoplayPollingFailed=false,autoplayShownOperation=null,autoplayShownReply=null,autoplaySiteAction=null;
@@ -35,7 +36,9 @@ async function refreshAutoplayChannels(action){
 function renderAutoplay(data){
  if(!data?.state||autoplayData?.state?.revision>data.state.revision)return;
  autoplayData=data;const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
- E("autoplayStatus").textContent=s.phase==="stopped"?"Parado.":s.code==="game_integration_missing"?"Não iniciado: o agente ainda não está ligado à execução das jogadas.":(labels[s.phase]||s.phase)+" · "+(s.reason||"");
+  const missing=(data.integration?.missing||[]).join("; ");
+  E("autoplayStatus").textContent=data.integration?.configured===false?"Execução bloqueada: "+(missing||s.reason||"adaptador autorizado indisponível"):(s.phase==="stopped"?"Parado.":(labels[s.phase]||s.phase)+" · "+(s.reason||""));
+  if(s.phase==="blocked"||s.phase==="uncertain"||s.phase==="failed")E("autoplayEvidence").open=true;
  const snapshot=s.snapshot,stats=snapshot?.stats||{},scalar=k=>stats[k]===null||stats[k]===undefined?"não confirmado":String(stats[k]),resource=k=>stats[k]?stats[k].current+" / "+stats[k].max:"não confirmado";
  E("autoplayStats").textContent="Nível: "+scalar("level")+" · XP: "+scalar("xp")+" · Vida: "+resource("hp")+" · Chakra: "+resource("chakra")+" · Energia: "+resource("energy")+"\nMissão: "+(snapshot?.mission?.label||snapshot?.mission?.status||"não confirmada")+" · Local: "+(snapshot?.location||"não confirmado");
  E("autoplayAction").textContent=s.pending?"Ação atual: "+s.pending.action.label+" · Canal "+s.pending.action.channel_id+" · ID "+s.pending.id:"Etapa: "+(s.cycle_stage||s.phase)+" · Ações confirmadas nesta ativação: "+(s.steps||0)+" / "+s.max_steps;
@@ -43,7 +46,7 @@ function renderAutoplay(data){
  const yes=v=>v===true?"sim":v===false?"não":"incerto / aguardando";
  E("autoplayStages").textContent=st?"Solicitada: "+yes(st.requested)+" · Tentativa de envio: "+yes(st.send_attempted)+" · Recebida pela integração: "+yes(st.sent)+" · Executada pelo jogo: "+yes(st.executed)+" · Resposta capturada: "+yes(st.response_captured)+" · Estado confirmado: "+yes(st.game_state_confirmed)+" · XP/nível aumentou: "+yes(st.progress_confirmed):"Nenhuma ação enviada nesta sessão do agente.";
  E("autoplayPersistence").textContent=data.note+" Uma ação já recebida pelo jogo pode terminar após Pausar ou Parar; ela será conferida pelo mesmo ID.";
- E("autoplayIntegration").textContent=data.integration?.configured?"Adaptador configurado. Autorização e ações válidas serão verificadas com o jogo antes de cada envio.":(data.integration?.missing||[]).join("\n");
+  E("autoplayIntegration").textContent=data.integration?.mode==="personal_user_token"?"Conexão pessoal/self-bot · credencial: "+(data.integration.credential_configured?"configurada, identidade conferida por operação":"ausente")+" · executor: "+(data.integration.executor_online?"online":"offline")+" · planejador: "+(data.integration.brain_ready?"online":"indisponível")+". Não é uma integração oficial do jogo.":data.integration?.configured?"Adaptador configurado. Autorização e ações válidas serão verificadas com o jogo antes de cada envio.":(data.integration?.missing||[]).join("\n");
  E("autoplayMissing").open=s.phase==="blocked";
  if(document.activeElement!==E("autoplayGoal")&&!E("autoplayGoal").value)E("autoplayGoal").value=s.goal||"";
  const history=E("autoplayHistory");history.replaceChildren();

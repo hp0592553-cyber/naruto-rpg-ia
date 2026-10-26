@@ -6,6 +6,7 @@
  */
 import {normalizeMessage} from "./message-normalizer.mjs";
 import {observeNaruto} from "./naruto-observer.mjs";
+import {validateMobileImages} from "./mobile-message.mjs";
 const API="https://discord.com/api/v10";
 const GUILD="1515877468299595919";
 const OWNER=/^\d{15,22}$/;
@@ -45,15 +46,15 @@ async function request(token,path,method="GET",body=null){
  const timeout=setTimeout(()=>controller.abort(),12000);
  try{
    const options={method,headers:{Authorization:token,Accept:"application/json"},signal:controller.signal};
-   if(body!==null){options.headers["Content-Type"]="application/json";options.body=JSON.stringify(body);}
+    if(body!==null){if(body instanceof FormData)options.body=body;else{options.headers["Content-Type"]="application/json";options.body=JSON.stringify(body);}}
    const res=await fetch(API+path,options);
    if(res.status===401)return {state:"unavailable",reason:"Token pessoal recusado (401).",code:401};
    if(res.status===403)return {state:"unavailable",reason:"Acesso negado pelo Discord (403); nenhum contorno de bloqueio será tentado.",code:403};
    if(res.status===429){let body=null;try{body=await res.json()}catch{} const h=Number.parseFloat(res.headers.get("retry-after")||res.headers.get("x-ratelimit-reset-after")||"");const j=Number(body?.retry_after);const raw=Number.isFinite(h)&&h>0?h:Number.isFinite(j)&&j>0?j:30;const seconds=Math.min(900,Math.max(1,Math.ceil(raw)));upstreamPauseByFingerprint.set(fingerprint,Math.max(upstreamPauseUntil,Date.now()+seconds*1000));if(upstreamPauseByFingerprint.size>16){for(const [k,until] of upstreamPauseByFingerprint)if(until<=Date.now())upstreamPauseByFingerprint.delete(k)}return {state:"unavailable",code:429,retry_after_seconds:seconds,reason:"Discord limitou requisições (429). Aguarde "+seconds+" segundos sem repetir."}}
-   if(!res.ok)return {state:"unavailable",reason:"Discord retornou HTTP "+res.status,code:res.status};
+    if(!res.ok)return {state:method!=="GET"&&res.status>=500?"unknown":"unavailable",reason:"Discord retornou HTTP "+res.status,code:res.status};
    const data=await res.json();
    return {state:"completed",data};
- }catch(e){return {state:"unavailable",reason:"Discord indisponível ou conexão expirou."};}
+  }catch(e){return {state:method!=="GET"?"unknown":"unavailable",reason:method!=="GET"?"Entrega incerta: Discord não respondeu. Consulte o recibo; não repita o envio.":"Discord indisponível ou conexão expirou."};}
  finally{clearTimeout(timeout);}
 }
 async function authorize(env,ctx){
@@ -118,9 +119,10 @@ export async function personalCall(env,name,args={},ctx={}){
      rpg_observation:observeNaruto(messages,ctx.me.id)};
  }
  if(args.confirmed!==true)return {state:"awaiting_confirmation",sent:false,reason:"Confirmação exata exigida."};
- const message=args.text;
- if(typeof message!=="string"||message!==message.trim()||message.length<1||message.length>500||/[\r\n\x00]/.test(message)||/@(?:everyone|here)\b/i.test(message))
-   return {state:"unavailable",reason:"Mensagem inválida (1 a 500 caracteres, sem menções globais ou quebras de linha).",sent:false};
+  const message=args.text;
+  let images;try{images=await validateMobileImages(args.files||[]);}catch(e){return {state:"unavailable",reason:e.message,sent:false};}
+  if(typeof message!=="string"||message!==message.trim()||!message.length&&!images.length||message.length>500||/\x00/.test(message)||/@(?:everyone|here)\b/i.test(message))
+    return {state:"unavailable",reason:"Mensagem inválida (até 500 caracteres ou imagem, sem menções globais).",sent:false};
  const key="naruto_personal_last_message";
  const record=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(ctx.me.id,key).first();
  const last=record?JSON.parse(record.value_json):null;
@@ -130,12 +132,15 @@ export async function personalCall(env,name,args={},ctx={}){
  if(mentions.length>5||!mentions.every(v=>id(v)&&message.includes("<@"+v+">")))return {state:"unavailable",reason:"IDs de marcação inválidos.",sent:false};
  const replyId=args.reply_to===undefined?null:String(args.reply_to);
  if(replyId!==null&&!id(replyId))return {state:"unavailable",reason:"ID da mensagem original inválido.",sent:false};
- const payload={content:message,allowed_mentions:{parse:[],users:mentions,replied_user:false},...(replyId?{message_reference:{type:0,message_id:replyId,channel_id:args.channel_id,guild_id:GUILD,fail_if_not_exists:true}}:{})};
- const result=await request(token,"/channels/"+args.channel_id+"/messages","POST",payload);
- if(result.state!=="completed")return {...result,sent:false};
+  const payload={content:message,allowed_mentions:{parse:[],users:mentions,replied_user:false},...(replyId?{message_reference:{type:0,message_id:replyId,channel_id:args.channel_id,guild_id:GUILD,fail_if_not_exists:true}}:{})};
+  if(args.nonce!==undefined){if(!/^\d{1,25}$/.test(String(args.nonce)))return {state:"unavailable",sent:false,reason:"Nonce inválido."};payload.nonce=String(args.nonce);payload.enforce_nonce=true;}
+  let outgoing=payload;
+  if(images.length){const form=new FormData();payload.attachments=images.map((f,i)=>({id:i,filename:f.name}));form.append('payload_json',JSON.stringify(payload));images.forEach((f,i)=>form.append('files['+i+']',f.file,f.name));outgoing=form;}
+  const result=await request(token,"/channels/"+args.channel_id+"/messages","POST",outgoing);
+  if(result.state!=="completed")return {...result,sent:result.state==="unknown"?null:false};
  const mid=result.data?.id;
- if(!id(mid)||String(result.data?.author?.id||"")!==ctx.me.id)
-   return {state:"unknown",sent:null,reason:"Discord não confirmou autor e ID; não repetir automaticamente."};
+  if(!id(mid)||String(result.data?.author?.id||"")!==ctx.me.id||String(result.data?.channel_id||"")!==args.channel_id)
+    return {state:"unknown",sent:null,reason:"Discord não confirmou autor, canal e ID; não repetir automaticamente."};
  let tracking_saved=true;
  try{await env.DB.prepare("INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at")
    .bind(ctx.me.id,key,JSON.stringify({at:stamp,id:mid}),stamp).run();
