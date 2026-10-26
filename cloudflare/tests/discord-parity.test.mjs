@@ -12,7 +12,7 @@ class Element {
 }
 const text=e=>e.textContent+e.children.map(text).join('');
 function fixture(){
- const c=vm.createContext({Intl,URL,Date,document:{createElement:t=>new Element(t),createTextNode:t=>Object.assign(new Element('#text'),{textContent:t})},gameUrl:()=> 'https://discord.com/channels/1/2/3',knownPeople:new Map(),safeDisplay:s=>s,S:{channels:[]}});
+ const notices=[];const c=vm.createContext({notices,status:(...args)=>notices.push(args),Intl,URL,Date,document:{createElement:t=>new Element(t),createTextNode:t=>Object.assign(new Element('#text'),{textContent:t})},gameUrl:()=> 'https://discord.com/channels/1/2/3',knownPeople:new Map(),safeDisplay:s=>s,S:{channels:[]}});
  const chunks=[['function discordTimestamp(','function trusted('],['function renderMentionText(','function findMentionPeople('],['function gameControls(','const knownPeople='],['function messageExtras(','function render(mode=']];
  for(const [a,b] of chunks)vm.runInContext(PANEL_JS.slice(PANEL_JS.indexOf(a),PANEL_JS.indexOf(b,PANEL_JS.indexOf(a))),c);
  const a=PANEL_JS.indexOf('const author='),b=PANEL_JS.indexOf('function searchKey(',a);vm.runInContext(PANEL_JS.slice(a,b)+';this.authorName=author',c);
@@ -32,7 +32,14 @@ test('all Discord timestamp formats render without raw syntax, invalid range sta
 });
 test('buttons from other bots are visible without sending an interaction',()=>{
  const c=fixture(),host=new Element();c.gameControls(host,{author_id:'123456789012345678',components:[{type:1,components:[{type:2,label:'Quick Sell',custom_id:'sell',style:1}]}]});
- assert.match(text(host),/Quick Sell/);const group=host.children.find(e=>e.className==='gameActions');assert.equal(group.children[0].href,undefined);assert.equal(group.children[0].attrs['aria-disabled'],'true');
+ assert.match(text(host),/Quick Sell/);const group=host.children.find(e=>e.className==='gameActions');assert.equal(group.children[0].href,undefined);const button=group.children[0];assert.equal(button.attrs['role'],'button');assert.equal(button.tabIndex,0);
+ assert.doesNotMatch(button.className,/v2Disabled/);
+ let prevented=0;button.onclick({preventDefault(){prevented++}});
+ button.onkeydown({key:'Enter',preventDefault(){prevented++}});
+ button.onkeydown({key:' ',preventDefault(){prevented++}});
+ button.onkeydown({key:'x',preventDefault(){throw Error('unexpected')}});
+ assert.equal(prevented,3);assert.equal(c.notices.length,3);
+ assert.ok(c.notices.every(([message,error])=>error===true&&/Ação não enviada/.test(message)));
 });
 test('link buttons preserve HTTPS destination and disabled/unsafe links are inert',()=>{
  const c=fixture();assert.equal(c.componentLink({style:5,url:'https://example.com/game'},{}),'https://example.com/game');
