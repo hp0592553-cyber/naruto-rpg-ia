@@ -40,12 +40,13 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
    const reconciled=await update(d=>{if(d.pending?.id!==p.id||d.revision!==saved.state.revision)return null;d.pending=null;d.refresh_observation=!old.confirmed;if(old.state!=='stopped')d.completed_keys.push(p.action.command);d.player_observations=(d.player_observations||[]).concat([{command:p.action.command,channel_id:p.action.channel_id||CHANNEL,text:old.confirmed?(old.response?.normalized_text||'Resposta recebida'):'Resultado incerto. Não repetir esta ação.'}]).slice(-30);if(!old.confirmed&&old.state!=='stopped')d.uncertain_actions=(d.uncertain_actions||[]).concat(p.action).slice(-100);if(old.confirmed&&old.response)d.last_result={operation_id:p.id,at:Date.now(),response:old.response};return d});
    if(!reconciled.changed)return reply(view(reconciled.state),200,HEAD);startRevision=reconciled.state.revision;
   }
-  const online=(await commandServiceHealth(env)).brain_ready;
-  if(!online){const r=await startCommandSession(request('command-session?brain=opencode',{}),env,ctx,baseUrl);if(!r.ok)return r}
+  const refreshPlanner=/opencode_timeout/.test(saved.state.reason||'');
+  const online=!refreshPlanner&&(await commandServiceHealth(env)).brain_ready;
+  if(!online){const r=await startCommandSession(request('command-session?brain=opencode'+(refreshPlanner?'&refresh=1':''),{}),env,ctx,baseUrl);if(!r.ok)return r}
   const baseline=(await readAutoplay(env,owner)).state;
   // A stop arriving during session setup must win over this older start.
   if(baseline.revision!==startRevision)return reply(view(baseline),200,HEAD);
-  const next=await update(d=>{if(d.revision!==baseline.revision)return null;d.context_channel_id=data.channel_id||d.context_channel_id||CHANNEL;d.chat_started_at=Date.now();d.plan_pending=null;d.plan_decision=null;d.lease=null;d.phase=online?'running':'waiting';d.reason=online?'Lendo sua ficha e o estado do jogo.':'Conectando o executor. Nenhuma ação enviada ainda.';d.code=null;d.run_id=crypto.randomUUID();d.steps=0;if(!d.player_observations?.length){d.completed_keys=[];d.player_observations=[];}d.next_tick_at=Date.now()+1000;return d});return reply(view(next.state),200,HEAD);
+  const next=await update(d=>{if(d.revision!==baseline.revision)return null;if(refreshPlanner)d.required_planner_revision='events-v2';d.context_channel_id=data.channel_id||d.context_channel_id||CHANNEL;d.chat_started_at=Date.now();d.plan_pending=null;d.plan_decision=null;d.lease=null;d.phase=online?'running':'waiting';d.reason=online?'Lendo sua ficha e o estado do jogo.':'Conectando o executor. Nenhuma ação enviada ainda.';d.code=null;d.run_id=crypto.randomUUID();d.steps=0;if(!d.player_observations?.length){d.completed_keys=[];d.player_observations=[];}d.next_tick_at=Date.now()+1000;return d});return reply(view(next.state),200,HEAD);
  }
  if(!['running','waiting','confirming'].includes(saved.state.phase))return reply(view(saved.state),200,HEAD);
  if(saved.state.lease&&saved.state.lease.until>Date.now())return reply(view(saved.state),200,HEAD);
@@ -72,7 +73,8 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   }
   const learned=await learn(env,{...ctx,context_channel_id:saved.state.context_channel_id||CHANNEL},{read:readChat,list:listChannels});
   if(learned.initial){const next=await commit(d=>{d.reason=learned.note;d.learning_progress=learned.progress;d.phase='waiting';d.next_tick_at=Date.now()+10000});return reply(view(next.state),200,HEAD)}
-  if(!(await commandServiceHealth(env)).online){
+  const executorHealth=await commandServiceHealth(env);
+  if(!executorHealth.online||(saved.state.required_planner_revision&&executorHealth.planner_revision!==saved.state.required_planner_revision)){
    if(Date.now()>=(saved.state.reconnect_at||0)){
     const renewed=await startCommandSession(request('command-session?brain=opencode',{}),env,ctx,baseUrl);const connection=await renewed.json();
     const next=await commit(d=>{d.phase='waiting';d.reason=connection.error||connection.note||'Reconectando o executor. Nenhum comando reenviado.';d.reconnect_at=Date.now()+120000;d.next_tick_at=Date.now()+5000});return reply(view(next.state),200,HEAD);

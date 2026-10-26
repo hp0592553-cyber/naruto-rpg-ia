@@ -10,7 +10,7 @@ async function put(env,key,data){await env.DB.prepare('INSERT INTO bushin_projec
 async function cas(env,old,next,key=JOB){const r=old?await env.DB.prepare('UPDATE bushin_project_state SET value_json=?,updated_at=? WHERE owner_id=? AND key=? AND value_json=?').bind(JSON.stringify(next),Date.now(),env.BUSHIN_OWNER_DISCORD_ID,key,old.raw).run():await env.DB.prepare('INSERT OR IGNORE INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?)').bind(env.BUSHIN_OWNER_DISCORD_ID,key,JSON.stringify(next),Date.now()).run();return Number(r.meta?.changes)===1}
 export const commandServiceConfigured=env=>typeof env.BUSHIN_EXECUTOR_TOKEN==='string'&&env.BUSHIN_EXECUTOR_TOKEN.length>=43;
 export async function commandServiceSelected(env){return commandServiceConfigured(env)||(await read(env,HEART))?.data.mode==='github_session'}
-export async function commandServiceHealth(env){const beat=await read(env,HEART);return {online:!!beat&&Date.now()-beat.data.at<30000&&Number(beat.data.version||0)>=2,brain_ready:!!beat&&Date.now()-beat.data.at<30000&&Number(beat.data.version||0)>=4,version:Number(beat?.data.version||0),expires_at:beat?.data.expires_at||null}}
+export async function commandServiceHealth(env){const beat=await read(env,HEART);return {online:!!beat&&Date.now()-beat.data.at<30000&&Number(beat.data.version||0)>=2,planner_revision:beat?.data.planner_revision||null,brain_ready:!!beat&&Date.now()-beat.data.at<30000&&Number(beat.data.version||0)>=4,version:Number(beat?.data.version||0),expires_at:beat?.data.expires_at||null}}
 async function archive(env,job){
  if(!job||!['finished','stopped','expired','uncertain'].includes(job.phase))return;
  // A delayed writer must not replace a confirmed historical result with uncertainty.
@@ -29,7 +29,7 @@ async function reconcileJob(env,row){
 }
 export async function startCommandSession(req,env,ctx,baseUrl){
  if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||ctx.me?.id!==String(env.BUSHIN_OWNER_DISCORD_ID)||ctx.me?.membership?.member!==true)return json({error:'Origem ou conta inválida'},403);
- const beat=await read(env,HEART);if(beat&&Date.now()-beat.data.at<30000&&Number(beat.data.version||0)>=(new URL(req.url).searchParams.get('brain')==='opencode'?4:2))return json({state:'connected',note:'Cliente já conectado.'});
+ const beat=await read(env,HEART);if(new URL(req.url).searchParams.get('refresh')!=='1'&&beat&&Date.now()-beat.data.at<30000&&Number(beat.data.version||0)>=(new URL(req.url).searchParams.get('brain')==='opencode'?4:2))return json({state:'connected',note:'Cliente já conectado.'});
  const pending=await reconcileJob(env,await read(env,JOB));if(pending&&['queued','claimed','sending'].includes(pending.data.phase))return json({error:'Existe uma ação pendente. Confira antes de renovar a sessão.'},409);
  const t=Date.now();const lock=await env.DB.prepare('INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at WHERE bushin_project_state.updated_at < ?').bind(env.BUSHIN_OWNER_DISCORD_ID,'discord2_session_dispatch',JSON.stringify({at:t}),t,t-120000).run();
  if(Number(lock.meta?.changes)!==1)return json({state:'queued',note:'Sessão já solicitada. Aguarde o início do GitHub.'});
