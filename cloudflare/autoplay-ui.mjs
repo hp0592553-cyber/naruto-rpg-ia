@@ -39,6 +39,7 @@ function renderAutoplay(data){
   if(m){const privateNote=document.createElement("div");privateNote.className="hint";privateNote.textContent=m.ephemeral?"🔒 Resposta privada da integração":"Resposta da integração";result.append(privateNote);if(m.content){const body=document.createElement("div");body.className="body";renderDiscordFormat(body,m,m.content);result.append(body)}const v2=renderComponentV2(result,m);gameEmbed(result,m);if(!v2){addMediaImages(result,m);gameControls(result,m)}}
  }
  if(s.last_result?.response&&s.last_result.operation_id!==autoplayShownOperation&&!slashProgress?.pending){showCommandResponse(s.last_result.response);paintSlashProgress("Resposta da IA jogadora","Resultado recebido do Naruto Bot.");autoplayShownOperation=s.last_result.operation_id;}
+ if(s.phase==="blocked"&&/não confirmou o resultado|não há caixa própria confirmada/i.test(s.reason||"")){E("gameToolbox").hidden=true;E("autoplayStatus").textContent="Pausado · A última interação não teve resposta confirmada. Nenhum clique será repetido.";}
  const active=["running","waiting","confirming"].includes(s.phase);
  E("autoplayStart").disabled=autoplayControlBusy||active;E("autoplayResume").disabled=autoplayControlBusy||active||!s.run_id;
  E("autoplayPause").disabled=autoplayControlBusy||["stopped","paused"].includes(s.phase);E("autoplayStop").disabled=autoplayControlBusy||s.phase==="stopped";
