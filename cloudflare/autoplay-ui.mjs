@@ -1,33 +1,26 @@
 /** Included inside the existing Discord 2 DOM/script, not a separate client or model. */
 export const AUTOPLAY_HTML=String.raw`
-<section id="autoplayPanel" class="autoplayPanel" aria-label="Agente jogador">
- <h3>🍥 Jogar por mim</h3>
- <p class="hint">Motor do agente: Llama 3.1 na Cloudflare. Execução somente pela integração autorizada do jogo.</p>
- <label for="autoplayGoal">O que você quer que a IA faça?</label>
- <textarea id="autoplayGoal" maxlength="500" rows="2" placeholder="Jogue por mim, confira minhas missões e evolua até o nível 20."></textarea>
- <div class="gameRoomActions">
+<section id="autoplayPanel" class="simplePlayer" aria-label="Controle do jogador">
+ <div class="simplePlayerButtons">
   <button type="button" id="autoplayStart" class="primary">▶ Jogar por mim</button>
-  <button type="button" id="autoplayPause">⏸ Pausar</button>
-  <button type="button" id="autoplayResume">⏵ Continuar</button>
   <button type="button" id="autoplayStop">⏹ Parar</button>
-  <button type="button" id="autoplayReview">🔎 Conferir ação pendente</button>
-  <button type="button" id="autoplayRefresh">↻ Atualizar estado</button>
  </div>
- <p id="autoplayStatus" class="hint" role="status" aria-live="polite">Lendo estado persistido…</p>
- <div id="autoplayStats" class="gameRoomStats">Ficha do personagem não confirmada.</div>
- <p id="autoplayAction" class="hint"></p>
- <p id="autoplayStages" class="hint"></p>
- <div id="autoplayResult" class="autoplayResult"></div>
- <p id="autoplayPersistence" class="hint"></p>
- <details><summary>Histórico do agente</summary><div id="autoplayHistory"></div></details>
- <details id="autoplayMissing"><summary>Integração e bloqueios</summary><p id="autoplayIntegration" class="hint"></p></details>
+ <p id="autoplayStatus" class="hint" role="status" aria-live="polite">Conferindo o jogador…</p>
+ <div hidden inert>
+  <textarea id="autoplayGoal">Jogar Naruto Project até o nível 20.</textarea>
+  <button id="autoplayPause">Pausar</button><button id="autoplayResume">Continuar</button>
+  <button id="autoplayReview">Conferir</button><button id="autoplayRefresh">Atualizar</button>
+  <div id="autoplayStats"></div><div id="autoplayAction"></div><div id="autoplayStages"></div>
+  <div id="autoplayResult"></div><div id="autoplayPersistence"></div><div id="autoplayHistory"></div>
+  <details id="autoplayMissing"><p id="autoplayIntegration"></p></details>
+ </div>
 </section>`;
 export const AUTOPLAY_JS=String.raw`
 let autoplayData=null,autoplayControlBusy=false,autoplayTickBusy=false,autoplayPollingFailed=false;
 function renderAutoplay(data){
  if(!data?.state||autoplayData?.state?.revision>data.state.revision)return;
  autoplayData=data;const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando cooldown",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
- E("autoplayStatus").textContent=(labels[s.phase]||s.phase)+" · "+(s.reason||"")+(s.code?" ["+s.code+"]":"");
+ E("autoplayStatus").textContent=s.code==="game_integration_missing"?"Não iniciado: o agente ainda não está ligado à execução das jogadas.":s.phase==="stopped"?"Parado.":(labels[s.phase]||s.phase)+" · "+(s.reason||"");
  const snapshot=s.snapshot,stats=snapshot?.stats||{},scalar=k=>stats[k]===null||stats[k]===undefined?"não confirmado":String(stats[k]),resource=k=>stats[k]?stats[k].current+" / "+stats[k].max:"não confirmado";
  E("autoplayStats").textContent="Nível: "+scalar("level")+" · XP: "+scalar("xp")+" · Vida: "+resource("hp")+" · Chakra: "+resource("chakra")+" · Energia: "+resource("energy")+"\nMissão: "+(snapshot?.mission?.label||snapshot?.mission?.status||"não confirmada")+" · Local: "+(snapshot?.location||"não confirmado");
  E("autoplayAction").textContent=s.pending?"Ação atual: "+s.pending.action.label+" · Canal "+s.pending.action.channel_id+" · ID "+s.pending.id:"Etapa: "+(s.cycle_stage||s.phase)+" · Ações confirmadas nesta ativação: "+(s.steps||0)+" / "+s.max_steps;
