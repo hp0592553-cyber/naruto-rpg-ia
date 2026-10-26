@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {PANEL_JS} from '../discord2-ui.mjs';
 function fixture(saved=null){
  const elements=new Map(),calls=[],storage=new Map(saved?[['bushin-slash-progress',JSON.stringify(saved)]]:[]);let answer={state:'in_progress',command:'/missoes diarias'};
- const c=vm.createContext({E:id=>{if(!elements.has(id))elements.set(id,{hidden:true,classList:{toggle(){}},textContent:''});return elements.get(id)},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},document:{visibilityState:'visible',addEventListener(){}},setInterval:()=>1,clearInterval(){},req:async(...args)=>{calls.push(args);if(answer instanceof Error)throw answer;return answer},refresh:async()=>{},Date});
+ const c=vm.createContext({E:id=>{if(!elements.has(id))elements.set(id,{hidden:true,classList:{toggle(){}},textContent:'',replaceChildren(){this.textContent=''}});return elements.get(id)},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},document:{visibilityState:'visible',addEventListener(){}},setInterval:()=>1,clearInterval(){},req:async(...args)=>{calls.push(args);if(answer instanceof Error)throw answer;return answer},refresh:async()=>{},Date});
  const a=PANEL_JS.indexOf('const slashProgressKey='),b=PANEL_JS.indexOf('async function sendSelectedSlash(',a);
  vm.runInContext(PANEL_JS.slice(a,b)+';this.api={startSlashProgress,checkSlashProgress,commandPhaseLabel,get:()=>slashProgress}',c);
  return {api:c.api,elements,calls,storage,setAnswer:v=>answer=v};
@@ -26,4 +26,14 @@ test('connection failure offers a read-only recheck instead of resending',async(
 test('reload restores the pending command and consults its state',async()=>{
  const f=fixture({command:'/missoes diarias',started:Date.now(),pending:true});await new Promise(r=>setImmediate(r));
  assert.equal(f.api.get().command,'/missoes diarias');assert.equal(f.calls.length,1);assert.equal(f.calls[0][0],'/ai/opencode');
+});
+
+test('new command clears the previous private response and shows executor queue notes',async()=>{
+ const f=fixture();f.api.startSlashProgress('/perfil ver');
+ f.elements.get('commandResponse').textContent='old private response';
+ f.api.startSlashProgress('/missoes diarias');
+ assert.equal(f.elements.get('commandResponse').textContent,'');
+ f.setAnswer({state:'queued',command:'/missoes diarias',note:'Executor GitHub na fila.'});
+ await f.api.checkSlashProgress();
+ assert.match(f.elements.get('commandProgressDetail').textContent,/Executor GitHub na fila/);
 });
