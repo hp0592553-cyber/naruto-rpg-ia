@@ -16,7 +16,7 @@ export const AUTOPLAY_HTML=String.raw`
  </div>
 </section>`;
 export const AUTOPLAY_JS=String.raw`
-let autoplayData=null,autoplayControlBusy=false,autoplayTickBusy=false,autoplayPollingFailed=false,autoplayShownOperation=null;
+let autoplayData=null,autoplayControlBusy=false,autoplayTickBusy=false,autoplayPollingFailed=false,autoplayShownOperation=null,autoplayShownReply=null;
 function renderAutoplay(data){
  if(!data?.state||autoplayData?.state?.revision>data.state.revision)return;
  autoplayData=data;const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
@@ -40,6 +40,7 @@ function renderAutoplay(data){
  }
  if(s.last_result?.response&&s.last_result.operation_id!==autoplayShownOperation&&!slashProgress?.pending){showCommandResponse(s.last_result.response);paintSlashProgress("Resposta da IA jogadora","Resultado recebido do Naruto Bot.");autoplayShownOperation=s.last_result.operation_id;}
  if(s.phase==="blocked"&&/não confirmou o resultado|não há caixa própria confirmada/i.test(s.reason||"")){E("gameToolbox").hidden=true;E("autoplayStatus").textContent="Pausado · A última interação não teve resposta confirmada. Nenhum clique será repetido.";}
+ if(s.last_chat_reply&&s.last_chat_reply.id!==autoplayShownReply){const sent=s.last_chat_reply;autoplayShownReply=sent.id;if(S.current===sent.channel_id&&!S.messages.some(m=>m.id===sent.id)){S.messages.push({id:sent.id,channel_id:sent.channel_id,author_id:s.owner_id,author_name:"Henrique",content:sent.text,timestamp:new Date().toISOString()});render("keep");}}
  const active=["running","waiting","confirming"].includes(s.phase);
  E("autoplayStart").disabled=autoplayControlBusy||active;E("autoplayResume").disabled=autoplayControlBusy||active||!s.run_id;
  E("autoplayPause").disabled=autoplayControlBusy||["stopped","paused"].includes(s.phase);E("autoplayStop").disabled=autoplayControlBusy||s.phase==="stopped";
@@ -53,7 +54,7 @@ async function controlAutoplay(action,goal){
  if(autoplayControlBusy)return null;autoplayControlBusy=true;let failedNotice=null;
  try{
   const current=await refreshAutoplay();if(!current)throw Error("Estado indisponível");
-  const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action,revision:current.state.revision,...(action==="start"||action==="resume"?{goal:goal||E("autoplayGoal").value}:{})})});
+  const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action,revision:current.state.revision,...(action==="start"||action==="resume"?{goal:goal||E("autoplayGoal").value,channel_id:S.current}:{})})});
   renderAutoplay(data);autoplayPollingFailed=false;return data;
  }catch(e){await refreshAutoplay();failedNotice="Pedido não concluído: "+e.message;return null;}
  finally{autoplayControlBusy=false;if(autoplayData)renderAutoplay(autoplayData);if(failedNotice)E("autoplayStatus").textContent=failedNotice;}
@@ -68,7 +69,7 @@ async function autoplayTick(){
 }
 for(const [id,action] of [["autoplayStart","start"],["autoplayPause","pause"],["autoplayResume","resume"],["autoplayStop","stop"],["autoplayReview","review"]])E(id).onclick=async()=>{const data=await controlAutoplay(action);if(data&&["start","resume"].includes(action))await autoplayTick();};
 E("autoplayRefresh").onclick=async()=>{autoplayPollingFailed=false;await refreshAutoplay()};
-setInterval(autoplayTick,5000);
+setInterval(autoplayTick,1000);
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")refreshAutoplay()});
 refreshAutoplay();
 `;

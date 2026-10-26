@@ -11,7 +11,7 @@ test('player queues a correlated query, stop prevents further actions, unconfirm
  rows.set('discord2_service_heartbeat_v1',JSON.stringify({at:Date.now(),version:2}));
  rows.set('discord2_catalog_cache_v7',JSON.stringify({at:Date.now(),commands:[{application_id:bot,name:'perfil',options:[{type:1,name:'ver'}]}]}));
  const ctx={me:{id:owner,membership:{member:true}}},baseUrl='https://example.test';
- const helpers={reply:(v,s)=>Response.json(v,{status:s}),baseUrl,seal:async x=>x,unseal:async x=>x};
+ const helpers={reply:(v,s)=>Response.json(v,{status:s}),baseUrl,readChat:async()=>({read:true,messages:[]}),seal:async x=>x,unseal:async x=>x};
  const call=async data=>{let req=data?new Request(baseUrl+'/mobile/discord2/api/autoplay',{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify(data)}):new Request(baseUrl+'/mobile/discord2/api/autoplay');return (await playerRoute(req,env,ctx,helpers)).json()};
  let r=await call();r=await call({action:'start',revision:r.state.revision});
  r=await call({action:'tick',revision:r.state.revision});assert.equal(r.state.phase,'confirming');assert.equal(r.state.pending.action.command,'/perfil ver');
@@ -37,4 +37,19 @@ test('component envelope comes from own real response, rejects foreign messages 
  assert.deepEqual(ownComponentOptions({},last),{message_id:'own-message',custom_id:'actual-button',values:'[]'});
  assert.throws(()=>ownComponentOptions({custom_id:'invented'},last));
  assert.throws(()=>ownComponentOptions({message_id:'foreign-message'},last));
+});
+
+test('chat pipeline resolves the real author, reserves once and confirms delivery',async()=>{
+ const rows=new Map();
+ const env={BUSHIN_OWNER_DISCORD_ID:owner,DB:{prepare(sql){let a;return {bind(...v){a=v;return this},async first(){return rows.has(a[1])?{value_json:rows.get(a[1])}:null},async run(){let n=0;if(sql.startsWith('UPDATE')){if(rows.get(a[3])===a[4]){rows.set(a[3],a[0]);n=1}}else if(!sql.includes('IGNORE')||!rows.has(a[1])){rows.set(a[1],a[2]);n=1}return {meta:{changes:n}}}}}},BUSHIN_AI:{async run(){return {response:'Já cheguei na Floresta.'}}}};
+ rows.set('discord2_service_heartbeat_v1',JSON.stringify({at:Date.now(),version:2}));
+ const author='123456789012345678',mid='234567890123456789',sends=[];
+ const helpers={reply:(v,s)=>Response.json(v,{status:s}),baseUrl:'https://example.test',unseal:async x=>x,
+ readChat:async()=>({read:true,messages:[{id:mid,author_id:author,timestamp:new Date(Date.now()+100).toISOString(),mentions:[{id:owner}],content:'Chegou?'}]}),
+ sendChat:async(_e,_n,args)=>{sends.push(args);return {sent:true,message_id:'345678901234567890'}}};
+ const ctx={me:{id:owner,membership:{member:true}}};
+ const call=async data=>(await playerRoute(new Request(helpers.baseUrl+'/mobile/discord2/api/autoplay',data?{method:'POST',headers:{origin:helpers.baseUrl,'content-type':'application/json'},body:JSON.stringify(data)}:{}),env,ctx,helpers)).json();
+ let r=await call();r=await call({action:'start',revision:r.state.revision,channel_id:channel});r=await call({action:'tick',revision:r.state.revision});
+ assert.equal(sends.length,1);assert.equal(sends[0].reply_to,mid);assert.deepEqual(sends[0].mention_ids,[author]);assert.equal(sends[0].text,'<@'+author+'> Já cheguei na Floresta.');assert.equal(r.state.last_chat_reply.id,'345678901234567890');assert.deepEqual(r.state.reserved_reply_ids,[mid]);
+ r=await call({action:'tick',revision:r.state.revision});assert.equal(sends.length,1);
 });
