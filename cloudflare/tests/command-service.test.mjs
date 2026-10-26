@@ -66,10 +66,12 @@ test('lost legacy claimed action becomes uncertain, never requeued, and can rece
  result=await (await commandServiceMobile(new Request('https://example.test/api?request_id='+request_id),env,ctx,helpers)).json();assert.equal(result.confirmed,true);
 });
 test('a renewed executor cannot click controls captured by an earlier process',async()=>{
+ for(const executor_id of ['runner-A','']){
  const {env,rows}=fixture();await commandServiceRunner(req('/bridge/commands/heartbeat',{owner_id:owner,ready:true,version:3,instance_id:'runner-B'}),env,helpers);
  const response={message_id:'1564274391158751294',channel_id:channel,controls:[{type:2,custom_id:'real-button'}]};
- rows.set('discord2_service_job_v1',JSON.stringify({request_id:crypto.randomUUID(),request:command,phase:'finished',confirmed:true,executor_id:'runner-A',sealed:{response}}));
+ rows.set('discord2_service_job_v1',JSON.stringify({request_id:crypto.randomUUID(),request:command,phase:'finished',confirmed:true,executor_id,sealed:{response}}));
  const state=await (await commandServiceMobile(new Request('https://example.test/api'),env,ctx,helpers)).json();assert.equal(state.controls_current,false);
  const r=await commandServiceMobile(req('/api',{action:'start',command_request:{command:'/component',channel_id:channel,options:{message_id:response.message_id,custom_id:'real-button',values:'[]'}}}),env,ctx,helpers);
  assert.equal(r.status,409);
+ }
 });

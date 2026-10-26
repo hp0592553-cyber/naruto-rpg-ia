@@ -53,3 +53,12 @@ test('permission loss refreshes membership and navigates to a returned allowed r
  let r=await f.call();r=await f.call({action:'start',revision:r.state.revision});r=await f.call({action:'tick',revision:r.state.revision});
  assert.equal(lists,1);assert.equal(r.state.phase,'waiting');assert.equal(r.state.context_channel_id,route);assert.equal(r.state.site_action.channel_id,route);assert.equal(f.get('discord2_service_job_v1'),null);
 });
+test('an old arrival does not require a forest channel or repeat travel; consults the real available map',async t=>{
+ const f=fixture(t,async()=>({read:true,messages:[]}),{listChannels:async()=>({listed:true,visibility_filtered:true,channels:[{id:channel,name:'Comandos',type:0}]})});
+ let r=await f.call();r=await f.call({action:'start',revision:r.state.revision});
+ const state=f.get('discord2_autoplay_v1');state.completed_keys=['/perfil ver','/nivel','/missoes minhas','/missoes ativas'];state.player_observations=[{command:'/viajar',channel_id:channel,text:'Viagem iniciada. Chegada automática <t:1700000000:F>'}];
+ f.put('discord2_autoplay_v1',state);
+ f.put('discord2_catalog_cache_v7',{at:Date.now(),commands:[{application_id:bot,name:'perfil',options:[{type:1,name:'ver'}]},{application_id:bot,name:'mapa'}]});
+ r=await f.call({action:'tick',revision:state.revision});assert.equal(r.state.phase,'confirming');assert.equal(r.state.pending.action.command,'/mapa');assert.equal(r.state.pending.action.channel_id,channel);assert.equal(r.state.pending.action.arrival_check,1700000000000);
+ const job=f.get('discord2_service_job_v1');assert.equal(job.request.command,'/mapa');
+});

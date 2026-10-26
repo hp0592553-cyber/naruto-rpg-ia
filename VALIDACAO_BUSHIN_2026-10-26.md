@@ -19,10 +19,12 @@ Branch: `Projeto`. Worker preservado: `bushin-discord-direct`.
 - Cargos e canais permitidos são relidos após mudança de acesso. A interface recarrega canais quando a IA navega para um canal recém-liberado.
 - Controles históricos não mandam mais abrir o Discord. Controles próprios são conferidos novamente antes do envio e ficam desativados se antigos.
 - Nível alvo somente pode ser considerado alcançado a partir de campo explícito em resposta correlacionada ao Henrique. Imagens não são interpretadas por esse parser.
+- A retomada real posterior mostrou outro bloqueio: viagem antiga exigia um canal chamado Floresta. A correção consulta o mapa no canal permitido retornado pelo jogo, sem repetir viagem nem supor destino; a chegada é marcada como revisada somente após resposta confirmada.
 
 ## Testes e limites
 
 - Testes JavaScript incluem SQLite real para concorrência, parada e meta com dados sintéticos; testes Python cobrem presença e cancelamento sem conexão Discord.
+- Verificação local: 156 testes JavaScript e dois testes Python. CI também confirmou a revisão anterior; o teste novo cobre a chegada antiga sem canal Floresta.
 - A página real do painel foi renderizada em fixture isolada, com **todas** as APIs simuladas: 390×844 e 390×480, campo focado, botões de 44 px, sem overflow horizontal. Jogar, Parar durante início lento e clique inline foram exercitados. O clique inline enviou um único pedido com IDs sintéticos e desativou o botão.
 - Altura reduzida simula o espaço ocupado pelo teclado; não comprova teclado Android real. A fixture está em `scripts/qa_mobile_fixture.mjs` e nunca se conecta ao Discord.
 - Erros de extensão do navegador em URLs `file://` apareceram no coletor; não eram do JavaScript do painel.

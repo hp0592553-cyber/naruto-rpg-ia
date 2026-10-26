@@ -99,7 +99,7 @@ export async function commandServiceMobile(req,env,ctx,{unseal,baseUrl}){
   const requested=new URL(req.url).searchParams.get('request_id');
   if(requested&&job?.request_id!==requested){job=(await read(env,archiveKey(requested)))?.data;if(!job)return json({state:'unknown',request_id:requested,confirmed:false,note:'Resultado histórico indisponível. Nenhum reenvio permitido.'})}
   if(!job)return json({state:'idle',confirmed:false,transport:'persistent_service'});
-  if(job.phase==='finished'){const result=job.sealed?await unseal(job.sealed,env):{},beat=await read(env,HEART);const controlsCurrent=(!job.executor_id||job.executor_id===beat?.data.instance_id)&&Date.now()-(beat?.data.at||0)<30000;return json({state:'finished',request_id:job.request_id,command:job.request.command,confirmed:job.confirmed,executed:job.confirmed,controls_current:controlsCurrent,...result,transport:'persistent_service'})}
+  if(job.phase==='finished'){const result=job.sealed?await unseal(job.sealed,env):{},beat=await read(env,HEART);const controlsCurrent=!!job.executor_id&&job.executor_id===beat?.data.instance_id&&Date.now()-(beat?.data.at||0)<30000;return json({state:'finished',request_id:job.request_id,command:job.request.command,confirmed:job.confirmed,executed:job.confirmed,controls_current:controlsCurrent,...result,transport:'persistent_service'})}
   if(['stopped','expired'].includes(job.phase))return json({state:'stopped',request_id:job.request_id,confirmed:false,command:job.request.command,note:'Pedido não enviado.'});
   if(job.phase==='uncertain')return json({state:'uncertain',request_id:job.request_id,command:job.request.command,confirmed:false,note:'Executor desconectou após reservar a ação. Não repetir.'});
   return json({state:['claimed','sending'].includes(job.phase)?'in_progress':'queued',request_id:job.request_id,command:job.request.command,confirmed:false,note:['claimed','sending'].includes(job.phase)?'Cliente conectado aguardando resposta do Naruto Bot.':'Aguardando o cliente permanente; sem iniciar GitHub Actions.'});
@@ -118,7 +118,7 @@ export async function commandServiceMobile(req,env,ctx,{unseal,baseUrl}){
  if(data.command_request.command==='/component'){
   const input=data.command_request.options;
   if(!job?.confirmed||!job.sealed)return json({error:'Não há caixa própria confirmada nesta sessão.'},409);
-  if(job.executor_id&&job.executor_id!==heartbeat.data.instance_id)return json({error:'A caixa pertence ao executor anterior. Atualize com uma consulta do jogo.'},409);
+  if(!job.executor_id||job.executor_id!==heartbeat.data.instance_id)return json({error:'A caixa pertence ao executor anterior. Atualize com uma consulta do jogo.'},409);
   const previous=(await unseal(job.sealed,env)).response;
   const control=(previous.controls||[]).find(c=>c.custom_id===input.custom_id&&!c.disabled&&!c.url&&[2,3].includes(c.type));
   let values;try{values=JSON.parse(input.values||'[]')}catch{return json({error:'Seleção inválida'},400)}
