@@ -2,7 +2,7 @@
 import {normalizeMessage} from './message-normalizer.mjs';
 const STATE='discord2_agent_v1',SNAPSHOT='discord2_character_v1';
 const initial=()=>({phase:'stopped',goal_level:20,revision:0,pending_action:null,reason:'Agente parado.'});
-const integration=()=>({ready:false,mode:'official',reason:'Falta uma API de jogo autorizada pelo Naruto Project para agir pelo Henrique. OAuth de identidade e um bot próprio não executam os comandos do Naruto Bot.'});
+const integration=()=>({ready:false,mode:'official',code:'game_integration_missing',required:['game_operator_authorization','documented_action_api','scoped_character_credential','idempotent_action_and_result_lookup'],reason:'Falta uma API de jogo autorizada pelo Naruto Project para agir pelo Henrique. OAuth de identidade e um bot próprio não executam os comandos do Naruto Bot.'});
 async function get(env,owner,key){const r=await env.DB.prepare('SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?').bind(owner,key).first();return r?JSON.parse(r.value_json):null}
 async function put(env,owner,key,value){await env.DB.prepare('INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at').bind(owner,key,JSON.stringify(value),Date.now()).run()}
 export function responseSnapshot(request,message,owner){
