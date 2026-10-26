@@ -90,6 +90,13 @@ async def execute_job(executor, job, state_dir):
     import re
     if not re.fullmatch(r'[a-f0-9-]{36}', request_id):
         raise ValueError('invalid_request_id')
+    if job.get('command') == '/agent-plan':
+        from opencode_planner import plan
+        result = {'request_id': request_id, 'brain': await plan(job.get('options', {}).get('context'))}
+        path = state_dir / 'pending-result.json'
+        store_result(path, result)
+        await deliver(path)
+        return
     data = validate_request(json.dumps({k: job[k] for k in ('command', 'channel_id', 'options')}))
     marker = state_dir / (request_id + '.reserved')
     # An existing marker makes consult refuse a second execution after any restart.
@@ -129,7 +136,7 @@ async def heartbeat(executor, deadline):
     while executor.client.is_ready() and asyncio.get_running_loop().time() < deadline:
         try:
             await asyncio.to_thread(request, 'heartbeat', {
-                'owner_id': str(executor.client.user.id), 'ready': True, 'version': 3, 'instance_id': INSTANCE_ID,
+                'owner_id': str(executor.client.user.id), 'ready': True, 'version': 4, 'instance_id': INSTANCE_ID,
                 'expires_at': int((time.time() + max(0, deadline - asyncio.get_running_loop().time())) * 1000),
             })
         except RuntimeError:
@@ -165,7 +172,7 @@ async def main():
             await deliver(pending)
         while executor.client.is_ready() and asyncio.get_running_loop().time() < deadline:
             try:
-                result = await asyncio.to_thread(request, 'poll', {'owner_id': str(executor.client.user.id), 'ready': True, 'version': 3, 'instance_id': INSTANCE_ID})
+                result = await asyncio.to_thread(request, 'poll', {'owner_id': str(executor.client.user.id), 'ready': True, 'version': 4, 'instance_id': INSTANCE_ID})
             except RuntimeError:
                 await asyncio.sleep(5)
                 continue

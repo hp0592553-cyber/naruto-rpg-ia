@@ -47,9 +47,17 @@ jobs:
           cache: pip
           cache-dependency-path: scripts/naruto-panel-requirements.txt
       - run: python -m pip install --disable-pip-version-check -r scripts/naruto-panel-requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar OpenCode para decidir ações do painel
+        run: npm install --global opencode-ai@1.19.4
       - name: Testar cliente persistente por até 25 minutos
         env:
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+          RPG_MODEL: ${{ vars.RPG_MODEL || 'opencode/big-pickle' }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           BUSHIN_STATE_DIR: ${{ runner.temp }}/bushin-command-session
         run: python scripts/command_service.py
   comando:
@@ -212,4 +220,3 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: ${{ runner.temp }}/naruto-evidence/
-

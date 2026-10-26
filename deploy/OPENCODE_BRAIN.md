@@ -1,0 +1,12 @@
+# OpenCode in Projeto
+
+The Discord 2 service mode installs OpenCode 1.19.4 and calls it for queued decisions (`/agent-plan`). The Worker supplies channel history, learned evidence, available commands and current owned controls. OpenCode returns JSON; it has no direct Discord credential or unrestricted shell/file tools. Existing Worker checks remain responsible for executing and confirming each selected action.
+
+- Model: existing repository variable `RPG_MODEL`, default `opencode/big-pickle` retained from the previous workflow.
+- Provider keys: existing Actions secrets `OPENCODE_API_KEY` / `OPENAI_API_KEY`. They are passed only to the planner process. Model/provider availability must be verified live.
+- Protocol: executor version 4. An idle older session must be renewed by stopping and starting the player. Do not renew while a game action is pending.
+- No silent Llama fallback for OpenCode planning or chat decisions.
+- Planning errors, invalid JSON and timeouts stop the player with the actual error category. A plan is never proof of a game action or XP.
+- Memory is supplied explicitly from stored observations and learning evidence on each decision. This does not retrain model weights.
+- The Actions session remains temporary (25 minutes). This is not 24/7 hosting or a guarantee of complete autonomous play.
+- No other branches are merged, deleted or deployed by this change.
