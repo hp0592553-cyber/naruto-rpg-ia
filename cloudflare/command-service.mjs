@@ -65,7 +65,7 @@ export async function commandServiceMobile(req,env,ctx,{unseal,baseUrl}){
  if(req.method==='GET'){
   if(!job)return json({state:'idle',confirmed:false,transport:'persistent_service'});
   if(job.phase==='finished'){const result=job.sealed?await unseal(job.sealed,env):{};return json({state:'finished',request_id:job.request_id,command:job.request.command,confirmed:job.confirmed,executed:job.confirmed,...result,transport:'persistent_service'})}
-  if(['stopped','expired'].includes(job.phase))return json({state:'stopped',confirmed:false,command:job.request.command,note:'Pedido não enviado.'});
+  if(['stopped','expired'].includes(job.phase))return json({state:'stopped',request_id:job.request_id,confirmed:false,command:job.request.command,note:'Pedido não enviado.'});
   return json({state:job.phase==='claimed'?'in_progress':'queued',request_id:job.request_id,command:job.request.command,confirmed:false,note:job.phase==='claimed'?'Cliente conectado aguardando resposta do Naruto Bot.':'Aguardando o cliente permanente; sem iniciar GitHub Actions.'});
  }
  if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||!req.headers.get('content-type')?.startsWith('application/json'))return json({error:'Origem ou formato inválido'},403);

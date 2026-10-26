@@ -17,26 +17,27 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
  if(req.method==='GET')return reply(view((await readAutoplay(env,owner)).state),200,HEAD);
  if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||!req.headers.get('content-type')?.startsWith('application/json'))return reply({error:'Origem inválida'},403,HEAD);
  let data;try{const text=await req.text();if(text.length>1500)throw Error();data=JSON.parse(text)}catch{return reply({error:'Pedido inválido'},400,HEAD)}
- const saved=await readAutoplay(env,owner);if(data.revision!==saved.state.revision)return reply({error:'Estado mudou. Atualize antes de continuar.'},409,HEAD);
+ const saved=await readAutoplay(env,owner);if(data.revision!==saved.state.revision&&!['stop','pause'].includes(data.action))return reply({error:'Estado mudou. Atualize antes de continuar.'},409,HEAD);
  const action=data.action;if(!['start','stop','tick','pause','resume','review'].includes(action))return reply({error:'Ação inválida'},400,HEAD);
  const update=fn=>changeAutoplay(env,owner,fn);
  const request=(path,body)=>new Request(baseUrl+'/mobile/discord2/api/ai/'+path,{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify(body)});
  const service=async body=>{const r=await commandServiceMobile(request('opencode',body),env,ctx,{unseal,baseUrl});const v=await r.json();if(!r.ok)throw Error(v.error||'Executor indisponível');return v};
  if(action==='stop'||action==='pause'){
-  const next=await update(d=>{d.phase='stopped';d.code=null;d.reason='Parado. Uma ação já recebida pelo jogo pode terminar.';d.run_id=null;return d});
+  const next=await update(d=>{d.phase='stopped';d.code=null;d.reason='Parado. Uma ação já recebida pelo jogo pode terminar.';d.run_id=null;d.lease=null;return d});
   try{await service({action:'stop'})}catch{}
   return reply(view(next.state),200,HEAD);
  }
  if(action==='start'||action==='resume'){
+  if(['running','waiting','confirming'].includes(saved.state.phase)&&saved.state.run_id)return reply(view(saved.state),200,HEAD);
   if(data.channel_id!==undefined&&!/^[0-9]{15,22}$/.test(data.channel_id))return reply({error:'Canal inválido'},400,HEAD);
   if(saved.state.pending){
    const r=await commandServiceMobile(new Request(baseUrl+'/mobile/discord2/api/ai/opencode'),env,ctx,{unseal,baseUrl});const old=await r.json(),p=saved.state.pending;
-   if(old.request_id!==p.id||old.state!=='finished')return reply({error:'Ainda há uma ação pendente. Nenhum reenvio foi feito.'},409,HEAD);
+   if(old.request_id!==p.id||!['finished','stopped'].includes(old.state))return reply({error:'Ainda há uma ação pendente. Nenhum reenvio foi feito.'},409,HEAD);
    await update(d=>{if(d.pending?.id!==p.id)return null;d.pending=null;d.refresh_menu=!old.confirmed&&!!d.last_result?.response?.controls?.length;d.completed_keys.push(p.action.command);d.player_observations=(d.player_observations||[]).concat([{command:p.action.command,channel_id:p.action.channel_id||CHANNEL,text:old.confirmed?(old.response?.normalized_text||'Resposta recebida'):'Resultado incerto. Não repetir esta ação.'}]);if(old.confirmed&&old.response)d.last_result={operation_id:p.id,at:Date.now(),response:old.response};return d});
   }
   const online=(await commandServiceHealth(env)).online;
   if(!online){const r=await startCommandSession(request('command-session',{}),env,ctx,baseUrl);if(!r.ok)return r}
-  const next=await update(d=>{d.context_channel_id=data.channel_id||d.context_channel_id||CHANNEL;d.chat_started_at=Date.now();d.phase=online?'running':'waiting';d.reason=online?'Lendo sua ficha e o estado do jogo.':'Conectando o executor. Nenhuma ação enviada ainda.';d.code=null;d.run_id=crypto.randomUUID();d.steps=0;if(!d.player_observations?.length){d.completed_keys=[];d.player_observations=[];}d.next_tick_at=Date.now()+1000;return d});return reply(view(next.state),200,HEAD);
+  const next=await update(d=>{d.context_channel_id=data.channel_id||d.context_channel_id||CHANNEL;d.chat_started_at=Date.now();d.lease=null;d.phase=online?'running':'waiting';d.reason=online?'Lendo sua ficha e o estado do jogo.':'Conectando o executor. Nenhuma ação enviada ainda.';d.code=null;d.run_id=crypto.randomUUID();d.steps=0;if(!d.player_observations?.length){d.completed_keys=[];d.player_observations=[];}d.next_tick_at=Date.now()+1000;return d});return reply(view(next.state),200,HEAD);
  }
  if(!['running','waiting','confirming'].includes(saved.state.phase))return reply(view(saved.state),200,HEAD);
  if(saved.state.lease&&saved.state.lease.until>Date.now())return reply(view(saved.state),200,HEAD);
