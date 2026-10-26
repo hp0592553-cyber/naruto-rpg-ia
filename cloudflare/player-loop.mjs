@@ -74,7 +74,11 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   const registry=await personalInspectCommand(env,{channel_id:CHANNEL,command:'/perfil ver'},ctx);
   if(!registry.catalog_verified||registry.stale)throw Error('Catálogo de comandos não confirmado.');
   const available=playerCommands(registry.commands).filter(x=>!saved.state.completed_keys.includes(x.command)||['/viajar','/acao coletar','/mapa'].includes(x.command));
-  const last=saved.state.last_result?.response;
+  const currentResponse=await (await commandServiceMobile(new Request(baseUrl+'/mobile/discord2/api/ai/opencode'),env,ctx,{unseal,baseUrl})).json();
+  const stored=saved.state.last_result;
+  const fresh=!!stored&&currentResponse.state==='finished'&&currentResponse.confirmed&&currentResponse.request_id===stored.operation_id&&currentResponse.response?.message_id===stored.response?.message_id;
+  const staleBox=!!stored?.response?.controls?.length&&!fresh;
+  const last=fresh?currentResponse.response:null;
   const controls=(last?.controls||[]).filter(c=>!c.disabled&&!c.url&&[2,3].includes(c.type));
   if(controls.length)available.push({command:'/component',description:'Usar somente uma das caixas da última resposta própria',options:[{name:'message_id',type:3,required:true},{name:'custom_id',type:3,required:true},{name:'values',type:3,required:true}]});
   const seed=['/perfil ver','/missoes minhas','/missoes ativas'].find(x=>!saved.state.completed_keys.includes(x)&&available.some(c=>c.command===x));
@@ -89,7 +93,8 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
    const refused=context.some(x=>x.command==='/viajar'&&/viagem indisponível|canais permitidos/i.test(x.text));
    const menu=forestControl(controls);
    const npc=controls.length===1&&controls[0].type===2&&String(controls[0].custom_id).startsWith('interagir:')?controls[0]:null;
-   if(arrival&&available.some(c=>c.command==='/mapa')&&!(saved.state.player_observations||[]).some(x=>x.command==='/mapa'&&forest&&x.channel_id===forest.id)){if(!forest)throw Error('A chegada ainda não liberou o canal da Floresta. Aguarde o jogo atualizar seus cargos.');selected={command:'/mapa',options:{},channel_id:forest.id};}
+   if(staleBox&&channels.some(c=>c.id===stored.response.channel_id)&&available.some(c=>c.command==='/mapa'))selected={command:'/mapa',channel_id:stored.response.channel_id,options:{},refresh_read:true};
+   else if(arrival&&available.some(c=>c.command==='/mapa')&&!(saved.state.player_observations||[]).some(x=>x.command==='/mapa'&&forest&&x.channel_id===forest.id)){if(!forest)throw Error('A chegada ainda não liberou o canal da Floresta. Aguarde o jogo atualizar seus cargos.');selected={command:'/mapa',options:{},channel_id:forest.id};}
    else if(gate&&(saved.state.refresh_menu||refused&&!context.some(x=>x.command==='/viajar'&&x.channel_id===gate.id)))selected={command:'/viajar',options:{},channel_id:gate.id};
    else if(menu){selected={command:'/component',channel_id:last.channel_id,options:{message_id:last.message_id,custom_id:menu.control.custom_id,values:JSON.stringify(menu.values)}};}
    else if(npc)selected={command:'/component',channel_id:last.channel_id,options:{message_id:last.message_id,custom_id:npc.custom_id,values:'[]'}};
@@ -105,7 +110,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   selected.channel_id=selected.channel_id||CHANNEL;
   if(selected.command==='/component'){selected.channel_id=last.channel_id;selected.options=ownComponentOptions(selected.options||{},last);const key=JSON.stringify([last.message_id,selected.options.custom_id,selected.options.values]);if((saved.state.completed_components||[]).includes(key))throw Error('Esta opção já foi usada nesta mensagem.');selected.component_key=key;}
   if(!channels.some(c=>c.id===selected.channel_id))throw Error('A IA não escolheu um canal acessível.');
-  if(selected.command!=='/component'&&!(saved.state.refresh_menu&&selected.command==='/viajar')&&(saved.state.player_observations||[]).some(x=>x.command===selected.command&&(x.channel_id||CHANNEL)===selected.channel_id))throw Error('Esta ação já foi conferida nesse canal; não vou repeti-la.');
+  if(selected.command!=='/component'&&!selected.refresh_read&&!(saved.state.refresh_menu&&selected.command==='/viajar')&&(saved.state.player_observations||[]).some(x=>x.command===selected.command&&(x.channel_id||CHANNEL)===selected.channel_id))throw Error('Esta ação já foi conferida nesse canal; não vou repeti-la.');
   const definition=available.find(x=>x.command===selected.command);
   const fields=definition.options||[],options=selected.options||{};
   for(const name of Object.keys(options))if(!fields.some(x=>x.name===name))throw Error('Parâmetro desconhecido em '+selected.command+': '+name);
