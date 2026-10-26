@@ -24,6 +24,7 @@ import {commandServiceSelected,commandServiceMobile,commandServiceRunner,startCo
 import {agentRoute,recordCommandEvidence} from "./rpg-agent.mjs";
 import {gameRoomRoute} from "./game-room.mjs";
 import {autoplayRoute,scheduledAutoplay} from "./autoplay.mjs";
+import {playerRoute} from "./player-loop.mjs";
 import {normalizeMessage} from "./message-normalizer.mjs";
 import {bushinAiNext} from "./discord2-ai.mjs";
 import {codexBridgeMobile,codexBridgeAgent} from "./codex-bridge.mjs";
@@ -920,7 +921,7 @@ export default {
         }
         if(path==="/mobile/discord2/api/search/mine"&&req.method==="POST")return await searchHenriqueMessages(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/ai/scan"&&req.method==="POST")return await scanRpgChannels(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
-        if(path==="/mobile/discord2/api/autoplay")return autoplayRoute(req,env,ctx,{reply,baseUrl:base(env)});
+        if(path==="/mobile/discord2/api/autoplay")return playerRoute(req,env,ctx,{reply,baseUrl:base(env),seal,unseal});
         if(path==="/mobile/discord2/api/game-room")return gameRoomRoute(req,env,ctx,{reply,baseUrl:base(env),plan:async channel_id=>{
           const result=await bushinAiNext(new Request(base(env)+"/mobile/discord2/api/ai/next",{
            method:"POST",headers:{origin:base(env),"content-type":"application/json"},

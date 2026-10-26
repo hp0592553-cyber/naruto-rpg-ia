@@ -8,6 +8,7 @@ async function put(env,key,data){await env.DB.prepare('INSERT INTO bushin_projec
 async function cas(env,old,next){const r=old?await env.DB.prepare('UPDATE bushin_project_state SET value_json=?,updated_at=? WHERE owner_id=? AND key=? AND value_json=?').bind(JSON.stringify(next),Date.now(),env.BUSHIN_OWNER_DISCORD_ID,JOB,old.raw).run():await env.DB.prepare('INSERT OR IGNORE INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?)').bind(env.BUSHIN_OWNER_DISCORD_ID,JOB,JSON.stringify(next),Date.now()).run();return Number(r.meta?.changes)===1}
 export const commandServiceConfigured=env=>typeof env.BUSHIN_EXECUTOR_TOKEN==='string'&&env.BUSHIN_EXECUTOR_TOKEN.length>=43;
 export async function commandServiceSelected(env){return commandServiceConfigured(env)||(await read(env,HEART))?.data.mode==='github_session'}
+export async function commandServiceHealth(env){const beat=await read(env,HEART);return {online:!!beat&&Date.now()-beat.data.at<30000}}
 export async function startCommandSession(req,env,ctx,baseUrl){
  if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||ctx.me?.id!==String(env.BUSHIN_OWNER_DISCORD_ID)||ctx.me?.membership?.member!==true)return json({error:'Origem ou conta inválida'},403);
  const beat=await read(env,HEART);if(beat&&Date.now()-beat.data.at<30000)return json({state:'connected',note:'Cliente já conectado.'});
@@ -62,9 +63,9 @@ export async function commandServiceMobile(req,env,ctx,{unseal,baseUrl}){
  const row=await read(env,JOB),job=row?.data;
  if(req.method==='GET'){
   if(!job)return json({state:'idle',confirmed:false,transport:'persistent_service'});
-  if(job.phase==='finished'){const result=job.sealed?await unseal(job.sealed,env):{};return json({state:'finished',command:job.request.command,confirmed:job.confirmed,executed:job.confirmed,...result,transport:'persistent_service'})}
+  if(job.phase==='finished'){const result=job.sealed?await unseal(job.sealed,env):{};return json({state:'finished',request_id:job.request_id,command:job.request.command,confirmed:job.confirmed,executed:job.confirmed,...result,transport:'persistent_service'})}
   if(['stopped','expired'].includes(job.phase))return json({state:'stopped',confirmed:false,command:job.request.command,note:'Pedido não enviado.'});
-  return json({state:job.phase==='claimed'?'in_progress':'queued',command:job.request.command,confirmed:false,note:job.phase==='claimed'?'Cliente conectado aguardando resposta do Naruto Bot.':'Aguardando o cliente permanente; sem iniciar GitHub Actions.'});
+  return json({state:job.phase==='claimed'?'in_progress':'queued',request_id:job.request_id,command:job.request.command,confirmed:false,note:job.phase==='claimed'?'Cliente conectado aguardando resposta do Naruto Bot.':'Aguardando o cliente permanente; sem iniciar GitHub Actions.'});
  }
  if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||!req.headers.get('content-type')?.startsWith('application/json'))return json({error:'Origem ou formato inválido'},403);
  let data;try{data=await body(req,12000)}catch{return json({error:'Pedido inválido'},400)}
