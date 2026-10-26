@@ -37,3 +37,20 @@ class Validation(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RelayExitStatus(unittest.TestCase):
+    def test_missing_delivery_fails_without_resending_the_action(self):
+        import contextlib
+        import io
+        from unittest.mock import AsyncMock, patch
+        for saved, expected in [(True, 0), (False, 2)]:
+            consult = AsyncMock(return_value={'command_completed':True,'response':{'content':'PRIVATE_TEST'}})
+            client = SimpleNamespace(close=AsyncMock())
+            executor = SimpleNamespace(status=AsyncMock(return_value={'status':'connected'}),
+                consult=consult,client=client,connection=None)
+            with self.subTest(saved=saved), patch.dict('sys.modules', {'naruto_guarded_mcp':executor}), patch.object(module,'publish_response',return_value=saved), contextlib.redirect_stdout(io.StringIO()) as output:
+                code=asyncio.run(module.run({'channel_id':'1520114348079583263','command':'/perfil ver','options':{}}))
+            self.assertEqual(code, expected)
+            self.assertEqual(consult.await_count, 1)
+            self.assertNotIn('PRIVATE_TEST', output.getvalue())

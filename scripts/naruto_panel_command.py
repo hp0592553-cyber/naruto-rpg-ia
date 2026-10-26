@@ -75,7 +75,10 @@ async def run(data):
     # Do not print response bodies or raw exceptions into public workflow logs.
     public = {k: result.get(k) for k in ('status', 'command_attempted', 'command_sent', 'command_completed', 'interaction_id', 'http_status', 'error_type', 'missing', 'response_relayed', 'relay_http_status', 'relay_stage', 'relay_error_type')}
     print(json.dumps(public, ensure_ascii=False))
-    return 0 if result.get('command_completed') is True else 1
+    # A captured response is not a delivered response. Never retry the Discord action here.
+    if result.get('command_completed') is not True:
+        return 1
+    return 0 if result.get('response_relayed') is True else 2
 
 
 if __name__ == '__main__':

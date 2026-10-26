@@ -21,8 +21,10 @@ import {personalListChannels} from "./personal-discord.mjs";
 import {personalInspectCommand,personalInvokeProfileProbe} from "./personal-discord.mjs";
 import {PANEL_HTML,PANEL_JS} from "./discord2-ui.mjs";
 import {agentRoute,recordCommandEvidence} from "./rpg-agent.mjs";
+import {gameRoomRoute} from "./game-room.mjs";
 import {normalizeMessage} from "./message-normalizer.mjs";
 import {bushinAiNext} from "./discord2-ai.mjs";
+import {codexBridgeMobile,codexBridgeAgent} from "./codex-bridge.mjs";
 import {bushinAutoRp} from "./discord2-autorp.mjs";
 import {searchHenriqueMessages,scanRpgChannels} from "./discord2-research.mjs";
 const DISCORD_CLIENT_ID="1561589128108314636";
@@ -864,6 +866,7 @@ export default {
       const b=base(env);
       if(new URL(req.url).origin!==b)return reply({error:"Unrecognized host"},403);
       if(path==="/internal/discord2-result")return receivePrivateCommandResult(req,env);
+       if(path.startsWith("/internal/codex-bridge/"))return codexBridgeAgent(req,env,{reply});
       if(path==="/mobile/discord2"&&req.method==="GET"){
         const row=await mobileSessionOwner(req,env);
         if(!row)return mGo("/mobile");
@@ -878,6 +881,7 @@ export default {
         const row=await mobileSessionOwner(req,env);
         if(!row)return reply({state:"unauthorized",error:"Faça login no Bushin em /mobile"},401,{"cache-control":"no-store"});
         const ctx={me:{id:row.user_id,membership:{guild_id:NARUTO_GUILD_ID,member:true}}},headers={"cache-control":"no-store","x-content-type-options":"nosniff"};
+         if(path==="/mobile/discord2/api/ai/codex-bridge")return codexBridgeMobile(req,env,ctx,{reply,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/channels"&&req.method==="GET"){
           const auth=await unseal(row.creds_encrypted,env);
           if(auth.expires<=now()+30000)return reply({state:"unauthorized",error:"Login Discord expirado. Entre novamente pelo Bushin."},401,headers);
@@ -910,7 +914,15 @@ export default {
         }
         if(path==="/mobile/discord2/api/search/mine"&&req.method==="POST")return await searchHenriqueMessages(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/ai/scan"&&req.method==="POST")return await scanRpgChannels(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
-        if(path==="/mobile/discord2/api/agent")return agentRoute(req,env,ctx,{reply,baseUrl:base(env),plan:async channel_id=>{
+        if(path==="/mobile/discord2/api/game-room")return gameRoomRoute(req,env,ctx,{reply,baseUrl:base(env),plan:async channel_id=>{
+          const result=await bushinAiNext(new Request(base(env)+"/mobile/discord2/api/ai/next",{
+           method:"POST",headers:{origin:base(env),"content-type":"application/json"},
+           body:JSON.stringify({channel_id,autoplay:true,avoid_commands:[],question:"Escolha uma próxima consulta segura para verificar a ficha ou missão do Henrique. Somente planeje, não execute comandos ou combate."})
+          }),env,ctx,{reply,personalCall,baseUrl:base(env)});
+          const data=await result.json();
+          return result.ok?{ok:true,result:data}:{ok:false,error:data.error||"IA não concluiu análise."};
+         }});
+         if(path==="/mobile/discord2/api/agent")return agentRoute(req,env,ctx,{reply,baseUrl:base(env),plan:async channel_id=>{
           const result=await bushinAiNext(new Request(base(env)+"/mobile/discord2/api/ai/next",{method:"POST",headers:{origin:base(env),"content-type":"application/json"},body:JSON.stringify({channel_id,autoplay:false,question:"Analise minha ficha e missão confirmadas e proponha um próximo passo válido. Apenas planejar."})}),env,ctx,{reply,personalCall,baseUrl:base(env)});
           const data=await result.json();return result.ok?{ok:true,plan:{analysis:data.analysis,next_step:data.next_step,model:data.model}}:{ok:false,error:data.error};
         }});

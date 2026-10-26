@@ -17,3 +17,5 @@ jobs:
         with:
           node-version: '24'
       - run: node --test cloudflare/tests/*.test.mjs
+      - name: Verificar sintaxe da ponte Codex CLI
+        run: python3 -m py_compile scripts/codex_bridge.py
