@@ -20,7 +20,7 @@ let autoplayData=null,autoplayControlBusy=false,autoplayTickBusy=false,autoplayP
 function renderAutoplay(data){
  if(!data?.state||autoplayData?.state?.revision>data.state.revision)return;
  autoplayData=data;const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando cooldown",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
- E("autoplayStatus").textContent=s.code==="game_integration_missing"?"Não iniciado: o agente ainda não está ligado à execução das jogadas.":s.phase==="stopped"?"Parado.":(labels[s.phase]||s.phase)+" · "+(s.reason||"");
+ E("autoplayStatus").textContent=s.phase==="stopped"?"Parado.":s.code==="game_integration_missing"?"Não iniciado: o agente ainda não está ligado à execução das jogadas.":(labels[s.phase]||s.phase)+" · "+(s.reason||"");
  const snapshot=s.snapshot,stats=snapshot?.stats||{},scalar=k=>stats[k]===null||stats[k]===undefined?"não confirmado":String(stats[k]),resource=k=>stats[k]?stats[k].current+" / "+stats[k].max:"não confirmado";
  E("autoplayStats").textContent="Nível: "+scalar("level")+" · XP: "+scalar("xp")+" · Vida: "+resource("hp")+" · Chakra: "+resource("chakra")+" · Energia: "+resource("energy")+"\nMissão: "+(snapshot?.mission?.label||snapshot?.mission?.status||"não confirmada")+" · Local: "+(snapshot?.location||"não confirmado");
  E("autoplayAction").textContent=s.pending?"Ação atual: "+s.pending.action.label+" · Canal "+s.pending.action.channel_id+" · ID "+s.pending.id:"Etapa: "+(s.cycle_stage||s.phase)+" · Ações confirmadas nesta ativação: "+(s.steps||0)+" / "+s.max_steps;
