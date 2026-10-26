@@ -16,13 +16,13 @@ def enroll_github():
     from urllib.parse import quote
     audience = BASE + '/bridge/commands/enroll'
     oidc_url = os.environ['ACTIONS_ID_TOKEN_REQUEST_URL'] + '&audience=' + quote(audience, safe='')
-    req = Request(oidc_url, headers={'Authorization': 'Bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+    req = Request(oidc_url, headers={'Authorization': 'Bearer ' + os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN'], 'User-Agent':'Bushin-Command-Service/1.0', 'Accept':'application/json'})
     with urlopen(req, timeout=15) as handle:
         try:
             jwt = json.load(handle)['value']
         except (ValueError, KeyError):
             raise RuntimeError('oidc_response_invalid') from None
-    req = Request(audience, data=b'{}', method='POST', headers={'Authorization': 'Bearer ' + jwt, 'Content-Type': 'application/json'})
+    req = Request(audience, data=b'{}', method='POST', headers={'Authorization': 'Bearer ' + jwt, 'Content-Type': 'application/json', 'User-Agent':'Bushin-Command-Service/1.0', 'Accept':'application/json'})
     try:
         with urlopen(req, timeout=15) as handle:
             try:
@@ -31,6 +31,8 @@ def enroll_github():
                 raise RuntimeError('worker_response_invalid') from None
     except HTTPError as exc:
         print('Enrollment Worker HTTP: ' + str(exc.code), flush=True)
+        print('Enrollment response type: ' + str(exc.headers.get('Content-Type', 'unknown'))[:80], flush=True)
+        print('Enrollment challenge: ' + str(exc.headers.get('cf-mitigated', 'none'))[:40], flush=True)
         try:
             stage = json.load(exc).get('stage')
         except ValueError:
@@ -44,7 +46,7 @@ def enroll_github():
 def request(route, data):
     token = SESSION_TOKEN or os.environ['BUSHIN_EXECUTOR_TOKEN']
     req = Request(BASE + '/bridge/commands/' + route, data=json.dumps(data).encode(),
-                  headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, method='POST')
+                  headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'User-Agent':'Bushin-Command-Service/1.0', 'Accept':'application/json'}, method='POST')
     try:
         with urlopen(req, timeout=15) as handle:
             return json.load(handle)
