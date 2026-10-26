@@ -144,16 +144,12 @@ test('Mobile browser in desktop-site viewport still sees a single-panel chat and
 });
 
 
-test('Natural language jogar por mim activates assisted planning rather than a fictional Discord send',()=>{
- const marker='if(/\\b(?:joga|jogue|jogar|continua|continue)';
- assert.match(PANEL_JS,/joga\|jogue\|jogar/);
- assert.match(PANEL_JS,/gameRoom"\)\.open=true/);
- assert.match(PANEL_JS,/await controlGameRoom\("plan"\)/);
- assert.match(PANEL_JS,/não foi executada/);
- assert.match(PANEL_JS,/joga\|jogue\|jogar\|continua\|continue/);
+test('Natural language gameplay controls target the execution controller instead of disguised planning',()=>{
+ assert.match(PANEL_JS,/controlAutoplay\(autoControl/);
+ assert.match(PANEL_JS,/await autoplayTick\(\)/);
+ assert.match(PANEL_JS,/continua\|continue\|continuar\|retome/);
  assert.doesNotThrow(()=>new Function(PANEL_JS));
 });
-
 
 test('same command after a proposal is not correlated without the exact request ID',async()=>{
  const DB=fakeDb(),env={DB,BUSHIN_OWNER_DISCORD_ID:owner};
