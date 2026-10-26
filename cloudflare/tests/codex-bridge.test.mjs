@@ -45,6 +45,12 @@ function mobile(method='GET',body=null,origin=baseUrl){
   ...(body?{body:JSON.stringify(body)}:{})
  });
 }
+test('private cloud chat keeps recent channel context beyond the old 1100-character truncation',async()=>{
+ let prompt='';const env={BUSHIN_OWNER_DISCORD_ID:owner,DB:fakeDb(),BUSHIN_AI:{async run(_model,input){prompt=input.messages[1].content;return {response:'Contexto recebido; nenhuma ação executada.'};}}};
+ const context='Canal 1520114348079583263\n'+'a'.repeat(1800)+'\nÚLTIMA MENSAGEM: encontro às oito.';
+ const res=await codexBridgeMobile(mobile('POST',{action:'cloud_chat',provider:'llama',intent:'conversar',question:'Qual o horário?',context,current_channel_id:'1520114348079583263',scan_scope:'none'}),env,ctx,{reply,baseUrl});
+ assert.equal(res.status,200);assert.match(prompt,/ÚLTIMA MENSAGEM: encontro às oito/);const data=await res.json();assert.equal(data.sent,false);assert.equal(data.executed_command,false);
+});
 function internal(path,method='GET',body=null,token=''){
  return new Request(baseUrl+'/internal/codex-bridge/'+path,{
   method,headers:{...(body?{'content-type':'application/json'}:{}),...(token?{authorization:'Bearer '+token}:{})},

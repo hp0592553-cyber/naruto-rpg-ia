@@ -2,6 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {playerCommands,playerRoute,forestControl,travelArrival,ownComponentOptions} from '../player-loop.mjs';
 const owner='481485837801095178',bot='1515908078913192026',channel='1520114348079583263';
+test('personal player reports credential presence separately from executor readiness and official authorization',async()=>{
+ const env={BUSHIN_OWNER_DISCORD_ID:owner,DB:{prepare(){return {bind(){return this},first:async()=>null}}}};
+ const helpers={reply:(v,s)=>Response.json(v,{status:s}),baseUrl:'https://example.test'};
+ const read=async()=>(await playerRoute(new Request(helpers.baseUrl+'/mobile/discord2/api/autoplay'),env,{me:{id:owner,membership:{member:true}}},helpers)).json();
+ let result=await read();assert.equal(result.integration.configured,false);assert.match(result.integration.missing.join(' '),/DISCORD_USER_TOKEN/);assert.equal(result.integration.official_game_authorization,false);
+ env.DISCORD_USER_TOKEN='synthetic-personal-credential-for-tests-only-123456789';
+ result=await read();assert.equal(result.integration.configured,true);assert.equal(result.integration.executor_online,false);assert.equal(result.integration.identity_verified,false);assert.equal(result.integration.personal_account_automation,true);
+});
 test('player catalog excludes admin and foreign applications',()=>{
  const c=playerCommands([{application_id:bot,name:'missoes',options:[{type:1,name:'ativas'}]},{application_id:bot,name:'admin'},{application_id:'123',name:'nivel'}]);
  assert.deepEqual(c.map(x=>x.command),['/missoes ativas']);
@@ -9,7 +17,8 @@ test('player catalog excludes admin and foreign applications',()=>{
 test('player queues a correlated query, stop prevents further actions, unconfirmed responses are not success',async()=>{
  const rows=new Map(),env={BUSHIN_OWNER_DISCORD_ID:owner,BUSHIN_EXECUTOR_TOKEN:'test-executor-credential-placeholder-123456789012345',DB:{prepare(sql){let a;return {bind(...v){a=v;return this},async first(){return rows.has(a[1])?{value_json:rows.get(a[1])}:null},async run(){let n=0;if(sql.startsWith('UPDATE')){if(rows.get(a[3])===a[4]){rows.set(a[3],a[0]);n=1}}else if(!sql.includes('IGNORE')||!rows.has(a[1])){rows.set(a[1],a[2]);n=1}return {meta:{changes:n}}}}}}};
  rows.set('discord2_service_heartbeat_v1',JSON.stringify({at:Date.now(),version:4}));
- rows.set('discord2_catalog_cache_v7',JSON.stringify({at:Date.now(),commands:[{application_id:bot,name:'perfil',options:[{type:1,name:'ver'}]}]}));
+  rows.set('discord2_catalog_cache_v7',JSON.stringify({at:Date.now(),commands:[{application_id:bot,name:'perfil',options:[{type:1,name:'ver'}]}]}));
+  env.DISCORD_USER_TOKEN='synthetic-personal-credential-for-tests-only-123456789';
  const ctx={me:{id:owner,membership:{member:true}}},baseUrl='https://example.test';
  const helpers={reply:(v,s)=>Response.json(v,{status:s}),baseUrl,readChat:async()=>({read:true,messages:[]}),seal:async x=>x,unseal:async x=>x};
  const call=async data=>{let req=data?new Request(baseUrl+'/mobile/discord2/api/autoplay',{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify(data)}):new Request(baseUrl+'/mobile/discord2/api/autoplay');return (await playerRoute(req,env,ctx,helpers)).json()};
@@ -43,7 +52,8 @@ test('chat pipeline resolves the real author, reserves once and confirms deliver
  const rows=new Map();
  const env={BUSHIN_OWNER_DISCORD_ID:owner,DB:{prepare(sql){let a;return {bind(...v){a=v;return this},async first(){return rows.has(a[1])?{value_json:rows.get(a[1])}:null},async run(){let n=0;if(sql.startsWith('UPDATE')){if(rows.get(a[3])===a[4]){rows.set(a[3],a[0]);n=1}}else if(!sql.includes('IGNORE')||!rows.has(a[1])){rows.set(a[1],a[2]);n=1}return {meta:{changes:n}}}}}},BUSHIN_AI:{async run(){return {response:'Já cheguei na Floresta.'}}}};
  rows.set('discord2_service_heartbeat_v1',JSON.stringify({at:Date.now(),version:4}));
- const author='123456789012345678',mid='234567890123456789',sends=[];
+  const author='123456789012345678',mid='234567890123456789',sends=[];
+  env.DISCORD_USER_TOKEN='synthetic-personal-credential-for-tests-only-123456789';
  const helpers={reply:(v,s)=>Response.json(v,{status:s}),baseUrl:'https://example.test',unseal:async x=>x,
  readChat:async()=>({read:true,messages:[{id:mid,author_id:author,timestamp:new Date(Date.now()+100).toISOString(),mentions:[{id:owner}],content:'Chegou?'}]}),
  sendChat:async(_e,_n,args)=>{sends.push(args);return {sent:true,message_id:'345678901234567890'}}};

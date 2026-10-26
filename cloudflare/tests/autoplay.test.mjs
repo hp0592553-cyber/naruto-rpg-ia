@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
-import {autoplayRoute,advanceAutoplay,permittedActions,scheduledAutoplay} from '../autoplay.mjs';
-import {readAutoplay,changeAutoplay} from '../autoplay-store.mjs';
+import {autoplayRoute,advanceAutoplay,permittedActions,scheduledAutoplay,readAuthorizedAutoplay as readAutoplay,changeAuthorizedAutoplay as changeAutoplay} from '../autoplay.mjs';
 import {GAME_PROTOCOL,createGameAdapter,validateObservation,validateGrant,boundedJson,retryAt} from '../game-adapter.mjs';
+import {readAutoplay as readLegacy,changeAutoplay as changeLegacy} from '../autoplay-store.mjs';
+import worker from '../worker.mjs';
+import {createHash} from 'node:crypto';
 const owner='481485837801095178',channel='1520114348079583263',baseUrl='https://bushin.example.test';
 function database(){
  const sql=new DatabaseSync(':memory:');sql.exec('CREATE TABLE bushin_project_state (owner_id TEXT NOT NULL,key TEXT NOT NULL,value_json TEXT NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(owner_id,key))');
@@ -47,6 +49,31 @@ function fixture(){
 test('missing operator integration blocks start and never falls back to Discord user token',async()=>{
  const f=fixture();delete f.env.BUSHIN_GAME;
  const {res,data}=await f.control('start');assert.equal(res.status,200);assert.equal(data.state.phase,'blocked');assert.equal(data.state.code,'game_integration_missing');assert.equal(data.state.steps,0);assert.match(data.integration.missing.join(' '),/BUSHIN_GAME/);assert.equal(data.background_execution,false);await f.tick();assert.equal(f.counts().postCount,0);assert.equal(f.counts().modelCount,0);
+});
+test('authorized controller isolates pending operations and progress from the legacy player',async()=>{
+ const f=fixture();
+ await changeLegacy(f.env,owner,d=>{d.phase='confirming';d.run_id='legacy-run';d.steps=12;d.snapshot={stats:{level:99}};d.pending={id:'legacy-request',action:{command:'/viajar'}};return d;});
+ const before=await readLegacy(f.env,owner);
+ const initial=await autoplayRoute(new Request(baseUrl+'/mobile/discord2/api/autoplay'),f.env,f.ctx,{reply:f.reply,baseUrl});
+ const data=await initial.json();assert.equal(data.controller,'authorized_game');assert.equal(data.state.steps,0);assert.equal(data.state.pending,null);assert.equal(data.state.snapshot,null);
+ await f.control('start');await f.tick();
+ const state=await f.read();assert.notEqual(state.pending.id,'legacy-request');assert.equal(f.counts().postCount,1);
+ assert.equal((await readLegacy(f.env,owner)).raw,before.raw);
+});
+test('optional authorized Worker route reports the exact block without personal transport',async t=>{
+ const f=fixture();delete f.env.BUSHIN_GAME;
+ Object.assign(f.env,{PUBLIC_BASE_URL:baseUrl,DISCORD_CLIENT_SECRET:'synthetic-client-secret',ENCRYPTION_KEY_BASE64:Buffer.alloc(32).toString('base64')});
+ const cookie='synthetic_mobile_session_'.padEnd(48,'x');
+ f.env.DB.sql.exec('CREATE TABLE mobile_user_sessions (token_hash TEXT PRIMARY KEY,user_id TEXT,creds_encrypted TEXT,expires_at INTEGER)');
+ f.env.DB.sql.prepare('INSERT INTO mobile_user_sessions VALUES (?,?,?,?)').run(createHash('sha256').update(cookie).digest('base64url'),owner,'not-needed-by-authorized-route',Date.now()+60000);
+ t.mock.method(globalThis,'fetch',async()=>{throw Error('No network request permitted without game integration');});
+ const request=(method='GET',body)=>new Request(baseUrl+'/mobile/discord2/api/autoplay/authorized',{method,headers:{cookie:'__Host-bushin_mobile='+cookie,origin:baseUrl,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+ let res=await worker.fetch(request(),f.env);assert.equal(res.status,200);let data=await res.json();assert.equal(data.controller,'authorized_game');assert.equal(data.integration.configured,false);
+ res=await worker.fetch(request('POST',{action:'start',revision:data.state.revision}),f.env);assert.equal(res.status,200);data=await res.json();assert.equal(data.state.code,'game_integration_missing');assert.equal(data.state.phase,'blocked');assert.match(data.integration.missing.join(' '),/BUSHIN_GAME/);
+ assert.equal((await readLegacy(f.env,owner)).raw,null);assert.deepEqual(f.counts(),{postCount:0,lookupCount:0,observeCount:0,modelCount:0});
+ const personalEnv=Object.create(f.env);Object.defineProperty(personalEnv,'DISCORD_USER_TOKEN',{value:'synthetic-personal-credential-for-tests-only-123456789'});
+ const defaultRequest=new Request(baseUrl+'/mobile/discord2/api/autoplay',{headers:{cookie:'__Host-bushin_mobile='+cookie}});
+ res=await worker.fetch(defaultRequest,personalEnv);assert.equal(res.status,200);data=await res.json();assert.equal(data.controller,'personal_player');assert.equal(data.integration.mode,'personal_user_token');assert.equal(data.integration.configured,true);assert.equal(data.integration.executor_online,false);assert.equal(data.integration.official_game_authorization,false);
 });
 test('start, dispatch, confirm, continue and reach target only from correlated game results',async()=>{
  const f=fixture();await f.control('start');

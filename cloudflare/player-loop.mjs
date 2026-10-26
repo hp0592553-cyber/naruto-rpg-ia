@@ -12,10 +12,28 @@ export function playerCommands(catalog){const walk=(n,p)=>{const path=p?n.name?p
 export function forestControl(controls){const key=s=>String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase();for(const c of controls||[]){if(c.disabled||c.url)continue;if(c.type===2&&key(c.label).includes('floresta'))return {control:c,values:[]};if(c.type===3){const option=c.options?.find(o=>key(o.label).includes('floresta'));if(option)return {control:c,values:[option.value]};}}return null;}
 export function ownComponentOptions(options,last){const result={...options};const controls=(last?.controls||[]).filter(c=>!c.disabled&&!c.url&&[2,3].includes(c.type));if(!result.custom_id&&controls.length===1)result.custom_id=controls[0].custom_id;const target=controls.find(c=>c.custom_id===result.custom_id);if(!target)throw Error('A IA não escolheu uma opção da última caixa.');if(result.message_id&&result.message_id!==last.message_id)throw Error('Caixa desatualizada.');result.message_id=last.message_id;if(!Object.hasOwn(result,'values')&&target.type===2)result.values='[]';return result;}
 export function travelArrival(text){if(!/Viagem iniciada|Chegada automática/i.test(text||''))return null;const stamp=String(text).match(/<t:(\d{10}):[FRf]> /)||String(text).match(/<t:(\d{10}):[FRf]>/);return stamp?Number(stamp[1])*1000:null;}
+export function confirmPlayerResult(state,pending,result,owner){
+ const response=result.response,interactionOwner=response?.interaction_metadata?.user_id||response?.interaction?.user_id;
+ if(result.request_id!==pending.id||result.command!==pending.action.command||result.state!=='finished'||!result.confirmed||!response||response.channel_id!==pending.action.channel_id||response.author_id!=='1515908078913192026'||interactionOwner&&interactionOwner!==owner)throw Error('Resposta sem correlação de pedido, canal, bot e conta. Nenhuma repetição será feita.');
+ const snapshot=responseSnapshot({command:pending.action.command,request_id:pending.id},response,owner),before=state.snapshot?.stats||{},parsed=snapshot?.stats||{};
+ const progress={level_delta:parsed.level&&Number.isFinite(before.level)?parsed.level.value-before.level:null,xp_delta:parsed.xp&&Number.isFinite(before.xp)?parsed.xp.value-before.xp:null};
+ state.last_operation={...pending,stages:{requested:true,send_attempted:true,sent:true,executed:result.executed===true?true:null,response_captured:true,game_state_confirmed:!!snapshot&&(Object.keys(parsed).length>0||!!snapshot.mission),progress_confirmed:(progress.level_delta||0)>0||(progress.level_delta===0&&(progress.xp_delta||0)>0)}};
+ state.steps++;if(!state.completed_keys.includes(pending.action.command))state.completed_keys.push(pending.action.command);
+ state.player_observations=(state.player_observations||[]).concat([{at:Date.now(),command:pending.action.command,channel_id:response.channel_id,text:response.normalized_text||response.content||'',controls:response.controls||[]}]).slice(-30);
+ state.last_result={operation_id:pending.id,at:Date.now(),response,progress};if(pending.action.arrival_check)state.arrival_reviewed=pending.action.arrival_check;
+ if(snapshot&&(Object.keys(parsed).length||snapshot.mission))state.snapshot={...state.snapshot,...snapshot,mission:snapshot.mission||state.snapshot?.mission||null,stats:{...before,...Object.fromEntries(Object.entries(parsed).map(([k,v])=>[k,['hp','chakra','energy'].includes(k)?{current:v.value,max:v.max}:v.value]))}};
+ state.pending=null;const active=['running','waiting','confirming'].includes(state.phase);
+ if(active)state.phase=state.snapshot?.stats?.level>=state.goal_level?'completed':'running';
+ state.reason=state.phase==='completed'?'Nível alvo confirmado na resposta do jogo.':active?'Resposta recebida. Escolhendo a próxima ação.':'Resultado conferido pelo ID. Nenhuma nova ação iniciada.';
+ state.next_tick_at=state.phase==='running'?Date.now()+1500:0;return recordAutoplay(state,'confirmed',pending.action.command);
+}
 export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readChat=personalCall,sendChat=personalCall,listChannels=personalListChannels,learn=learnStep}){
  const owner=String(ctx.me?.id||'');const HEAD={'cache-control':'no-store'};
  if(owner!==String(env.BUSHIN_OWNER_DISCORD_ID)||ctx.me?.membership?.member!==true)return reply({error:'Conta não autorizada'},403,HEAD);
- const view=state=>({state,integration:{configured:true,missing:[]},note:'Ativo enquanto esta página estiver aberta e o executor estiver conectado.'});
+ const credentialConfigured=typeof env.DISCORD_USER_TOKEN==='string'&&env.DISCORD_USER_TOKEN.trim().length>=35;
+ const health=await commandServiceHealth(env);
+ const integration={configured:credentialConfigured,mode:'personal_user_token',credential_configured:credentialConfigured,identity_verified:false,executor_online:health.online,brain_ready:health.brain_ready,personal_account_automation:true,official_game_authorization:false,code:credentialConfigured?null:'personal_session_not_configured',missing:credentialConfigured?[]:['DISCORD_USER_TOKEN: credencial da conta pessoal no Worker']};
+ const view=state=>({state,controller:'personal_player',integration,note:'Conexão pessoal solicitada pelo proprietário. Credencial configurada não comprova identidade, executor online ou jogada. Cada envio exige sua própria confirmação de resultado.'});
  if(req.method==='GET')return reply(view((await readAutoplay(env,owner)).state),200,HEAD);
  if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||!req.headers.get('content-type')?.startsWith('application/json'))return reply({error:'Origem inválida'},403,HEAD);
  let data;try{const text=await req.text();if(text.length>1500)throw Error();data=JSON.parse(text)}catch{return reply({error:'Pedido inválido'},400,HEAD)}
@@ -26,18 +44,36 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
  const service=async body=>{const r=await commandServiceMobile(request('opencode',body),env,ctx,{unseal,baseUrl});const v=await r.json();if(!r.ok)throw Error(v.error||'Executor indisponível');return v};
  const lookup=async id=>(await commandServiceMobile(new Request(baseUrl+'/mobile/discord2/api/ai/opencode'+(id?'?request_id='+encodeURIComponent(id):'')),env,ctx,{unseal,baseUrl})).json();
  if(action==='stop'||action==='pause'){
-  const next=await update(d=>{d.phase='stopped';d.code=null;d.reason='Parado. Uma ação já recebida pelo jogo pode terminar.';d.run_id=null;d.lease=null;return d});
+   const next=await update(d=>{d.phase=action==='pause'?'paused':'stopped';d.code=null;d.reason=(action==='pause'?'Pausado.':'Parado.')+' Uma ação já recebida pelo jogo pode terminar.';d.run_id=null;d.lease=null;return d});
   try{await service({action:'stop'})}catch{}
   return reply(view(next.state),200,HEAD);
  }
- if(action==='start'||action==='resume'){
+  if(action==='review'){
+   const pending=saved.state.pending;if(!pending)return reply(view(saved.state),200,HEAD);
+   const result=await lookup(pending.id);
+   if(result.state==='finished'&&result.confirmed&&result.response){
+    try{const next=await update(d=>{if(d.pending?.id!==pending.id)return null;return confirmPlayerResult(d,pending,result,owner);});return reply(view(next.state),200,HEAD);}
+    catch(e){return reply({error:e.message,code:'result_uncorrelated'},409,HEAD);}
+   }
+   const next=await update(d=>{if(d.pending?.id!==pending.id)return null;d.reason=result.note||'O resultado ainda não foi confirmado. Nenhuma ação reenviada.';return d;});return reply(view(next.state),200,HEAD);
+  }
+  if(action==='start'||action==='resume'){
+   if(!integration.configured){const next=await update(d=>{d.phase='blocked';d.code=integration.code;d.reason=integration.missing.join('; ');return d});return reply(view(next.state),200,HEAD);}
   if(['running','waiting','confirming'].includes(saved.state.phase)&&saved.state.run_id)return reply(view(saved.state),200,HEAD);
   if(data.channel_id!==undefined&&!/^[0-9]{15,22}$/.test(data.channel_id))return reply({error:'Canal inválido'},400,HEAD);
   let startRevision=saved.state.revision;
   if(saved.state.pending){
    const p=saved.state.pending,old=await lookup(p.id);
    if(old.request_id!==p.id||!['finished','stopped','uncertain','unknown'].includes(old.state))return reply({error:'Ainda há uma ação pendente. Nenhum reenvio foi feito.'},409,HEAD);
-   const reconciled=await update(d=>{if(d.pending?.id!==p.id||d.revision!==saved.state.revision)return null;d.pending=null;d.refresh_observation=!old.confirmed;if(old.state!=='stopped')d.completed_keys.push(p.action.command);d.player_observations=(d.player_observations||[]).concat([{command:p.action.command,channel_id:p.action.channel_id||CHANNEL,text:old.confirmed?(old.response?.normalized_text||'Resposta recebida'):'Resultado incerto. Não repetir esta ação.'}]).slice(-30);if(!old.confirmed&&old.state!=='stopped')d.uncertain_actions=(d.uncertain_actions||[]).concat(p.action).slice(-100);if(old.confirmed&&old.response)d.last_result={operation_id:p.id,at:Date.now(),response:old.response};return d});
+    const reconciled=await update(d=>{
+     if(d.pending?.id!==p.id||d.revision!==saved.state.revision)return null;
+     if(old.confirmed&&old.response)return confirmPlayerResult(d,p,old,owner);
+     d.pending=null;d.refresh_observation=true;
+     if(old.state!=='stopped')d.completed_keys.push(p.action.command);
+     d.player_observations=(d.player_observations||[]).concat([{command:p.action.command,channel_id:p.action.channel_id||CHANNEL,text:'Resultado incerto. Não repetir esta ação.'}]).slice(-30);
+     if(old.state!=='stopped')d.uncertain_actions=(d.uncertain_actions||[]).concat(p.action).slice(-100);
+     return d;
+    });
    if(!reconciled.changed)return reply(view(reconciled.state),200,HEAD);startRevision=reconciled.state.revision;
   }
   const refreshPlanner=/opencode_timeout/.test(saved.state.reason||'');
@@ -68,8 +104,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
    if(['uncertain','unknown','stopped'].includes(result.state))throw Error('A ação terminou sem resultado confirmado. Não vou repeti-la.');
    if(result.state!=='finished'){const next=await commit(d=>{d.reason='Aguardando a resposta de '+pending.action.command;d.next_tick_at=Date.now()+2000});return reply(view(next.state),200,HEAD)}
    if(!result.confirmed||!result.response)throw Error('O jogo não confirmou o resultado. Não vou repetir o comando.');
-   const snapshot=responseSnapshot({command:pending.action.command,request_id:pending.id},result.response,owner);
-   const next=await commit(d=>{d.steps++;d.completed_keys.push(pending.action.command);d.player_observations=(d.player_observations||[]).concat([{at:Date.now(),command:pending.action.command,channel_id:result.response.channel_id,text:result.response.normalized_text||result.response.content||'',controls:result.response.controls||[]}]).slice(-30);d.last_result={operation_id:pending.id,at:Date.now(),response:result.response};if(pending.action.arrival_check)d.arrival_reviewed=pending.action.arrival_check;if(snapshot&&Object.keys(snapshot.stats).length)d.snapshot={...snapshot,stats:{...(d.snapshot?.stats||{}),...Object.fromEntries(Object.entries(snapshot.stats).map(([k,v])=>[k,['hp','chakra','energy'].includes(k)?{current:v.value,max:v.max}:v.value]))}};d.pending=null;d.phase=d.snapshot?.stats?.level>=d.goal_level?'completed':'running';d.reason=d.phase==='completed'?'Nível alvo confirmado na resposta do jogo.':'Resposta recebida. Escolhendo a próxima ação.';d.next_tick_at=d.phase==='completed'?0:Date.now()+1500;recordAutoplay(d,'confirmed',pending.action.command)});return reply(view(next.state),200,HEAD);
+    const next=await commit(d=>confirmPlayerResult(d,pending,result,owner));return reply(view(next.state),200,HEAD);
   }
   const learned=await learn(env,{...ctx,context_channel_id:saved.state.context_channel_id||CHANNEL},{read:readChat,list:listChannels});
   if(learned.initial){const next=await commit(d=>{d.reason=learned.note;d.learning_progress=learned.progress;d.phase='waiting';d.next_tick_at=Date.now()+10000});return reply(view(next.state),200,HEAD)}

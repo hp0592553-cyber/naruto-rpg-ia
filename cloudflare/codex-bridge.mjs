@@ -171,7 +171,7 @@ export async function codexBridgeMobile(req,env,ctx,{reply,baseUrl}){
    return reply({error:"Codex API não configurado. Defina OPENAI_API_KEY como Secret no Worker. O plano ChatGPT não inclui créditos de API.",code:"missing_api_key"},503,RESPONSE_HEADERS);
   const intent=String(parsed.body?.intent||"conversar");
   const question=safeText(parsed.body?.question,700);
-  const context=safeText(parsed.body?.context,1100);
+   const context=safeText(parsed.body?.context,2400);
   const scope=String(parsed.body?.scan_scope||"scanned");
   const selected=Array.isArray(parsed.body?.scan_channel_ids)?parsed.body.scan_channel_ids.filter(x=>typeof x==="string"&&/^\d{15,22}$/.test(x)).slice(0,50):[];
   const current=typeof parsed.body?.current_channel_id==="string"&&/^\d{15,22}$/.test(parsed.body.current_channel_id)?parsed.body.current_channel_id:"";
@@ -200,7 +200,7 @@ export async function codexBridgeMobile(req,env,ctx,{reply,baseUrl}){
    return reply({error:"Codex chat ainda indisponível. Atualize o script da ponte no Codespaces e deixe-o executando."},409,RESPONSE_HEADERS);
   const intent=String(parsed.body?.intent||"conversar");
   const question=safeText(parsed.body?.question,700);
-  const context=safeText(parsed.body?.context,1100);
+   const context=safeText(parsed.body?.context,2400);
   const scope=String(parsed.body?.scan_scope||"scanned");
   const selected=Array.isArray(parsed.body?.scan_channel_ids)?parsed.body.scan_channel_ids.filter(x=>typeof x==="string"&&/^\d{15,22}$/.test(x)).slice(0,50):[];
   const current=typeof parsed.body?.current_channel_id==="string"&&/^\d{15,22}$/.test(parsed.body.current_channel_id)?parsed.body.current_channel_id:"";
