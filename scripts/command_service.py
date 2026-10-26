@@ -136,7 +136,7 @@ async def heartbeat(executor, deadline):
     while executor.client.is_ready() and asyncio.get_running_loop().time() < deadline:
         try:
             await asyncio.to_thread(request, 'heartbeat', {
-                'owner_id': str(executor.client.user.id), 'ready': True, 'version': 4, 'planner_revision': 'events-v2', 'instance_id': INSTANCE_ID,
+                'owner_id': str(executor.client.user.id), 'ready': True, 'version': 4, 'planner_revision': 'server-v3', 'instance_id': INSTANCE_ID,
                 'expires_at': int((time.time() + max(0, deadline - asyncio.get_running_loop().time())) * 1000),
             })
         except RuntimeError:
