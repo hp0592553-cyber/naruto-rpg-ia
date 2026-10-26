@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {playerCommands,playerRoute} from '../player-loop.mjs';
+import {playerCommands,playerRoute,forestControl} from '../player-loop.mjs';
 const owner='481485837801095178',bot='1515908078913192026',channel='1520114348079583263';
 test('player catalog excludes admin and foreign applications',()=>{
  const c=playerCommands([{application_id:bot,name:'missoes',options:[{type:1,name:'ativas'}]},{application_id:bot,name:'admin'},{application_id:'123',name:'nivel'}]);
@@ -18,4 +18,10 @@ test('player queues a correlated query, stop prevents further actions, unconfirm
  const job=JSON.parse(rows.get('discord2_service_job_v1'));assert.equal(job.request_id,r.state.pending.id);
  r=await call({action:'stop',revision:r.state.revision});assert.equal(r.state.phase,'stopped');
  const revision=r.state.revision;r=await call({action:'tick',revision});assert.equal(r.state.revision,revision);assert.equal(r.state.steps,0);
+});
+
+test('forest destination supports real buttons and selects, excludes disabled and links',()=>{
+ assert.deepEqual(forestControl([{type:2,label:'Floresta e Rio · 4 min',custom_id:'real-id'}]),{control:{type:2,label:'Floresta e Rio · 4 min',custom_id:'real-id'},values:[]});
+ assert.equal(forestControl([{type:2,label:'Floresta',disabled:true},{type:2,label:'Floresta',url:'https://example.test'}]),null);
+ assert.deepEqual(forestControl([{type:3,options:[{label:'Floresta',value:'actual-value'}]}]).values,['actual-value']);
 });
