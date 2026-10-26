@@ -16,7 +16,22 @@ export const AUTOPLAY_HTML=String.raw`
  </div>
 </section>`;
 export const AUTOPLAY_JS=String.raw`
-let autoplayData=null,autoplayControlBusy=false,autoplayTickBusy=false,autoplayPollingFailed=false,autoplayShownOperation=null,autoplayShownReply=null,autoplaySiteAction=null;
+let autoplayData=null,autoplayControlBusy=false,autoplayStopBusy=false,autoplayTickBusy=false,autoplayPollingFailed=false,autoplayShownOperation=null,autoplayShownReply=null,autoplaySiteAction=null;
+let autoplayChannelRefreshBusy=false,autoplayChannelRetryAt=0;
+async function refreshAutoplayChannels(action){
+ if(autoplayChannelRefreshBusy||Date.now()<autoplayChannelRetryAt)return;
+ autoplayChannelRefreshBusy=true;
+ try{
+  const listed=await req("/channels");
+  if(!listed.listed||!Array.isArray(listed.channels))throw Error("Canais não confirmados");
+  S.channels=listed.channels;build();
+  const state=autoplayData?.state;
+  if(!["running","waiting","confirming"].includes(state?.phase)||state.site_action?.id!==action.id)return;
+  if(!S.channels.some(c=>c.id===action.channel_id))throw Error("O novo canal ainda não está disponível");
+  await select(action.channel_id);autoplaySiteAction=action.id;
+ }catch(e){autoplayChannelRetryAt=Date.now()+5000;status("Não foi possível atualizar o canal: "+e.message,true);}
+ finally{autoplayChannelRefreshBusy=false;}
+}
 function renderAutoplay(data){
  if(!data?.state||autoplayData?.state?.revision>data.state.revision)return;
  autoplayData=data;const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
@@ -43,9 +58,10 @@ function renderAutoplay(data){
  if(s.last_chat_reply&&s.last_chat_reply.id!==autoplayShownReply){const sent=s.last_chat_reply;autoplayShownReply=sent.id;if(S.current===sent.channel_id&&!S.messages.some(m=>m.id===sent.id)){S.messages.push({id:sent.id,channel_id:sent.channel_id,author_id:s.owner_id,author_name:"Henrique",content:sent.text,timestamp:new Date().toISOString()});render("keep");}}
  const active=["running","waiting","confirming"].includes(s.phase);
  if(active&&s.site_action?.type==="channel"&&s.site_action.id!==autoplaySiteAction&&S.channels.some(c=>c.id===s.site_action.channel_id)){autoplaySiteAction=s.site_action.id;if(S.current!==s.site_action.channel_id)select(s.site_action.channel_id).catch(e=>status("Não foi possível abrir o canal: "+e.message,true));}
+ if(active&&s.site_action?.type==="channel"&&s.site_action.id!==autoplaySiteAction&&!S.channels.some(c=>c.id===s.site_action.channel_id))refreshAutoplayChannels(s.site_action);
 
- E("autoplayStart").disabled=autoplayControlBusy||active;E("autoplayResume").disabled=autoplayControlBusy||active||!s.run_id;
- E("autoplayPause").disabled=autoplayControlBusy||["stopped","paused"].includes(s.phase);E("autoplayStop").disabled=autoplayControlBusy||s.phase==="stopped";
+ E("autoplayStart").disabled=autoplayControlBusy||autoplayStopBusy||active;E("autoplayResume").disabled=autoplayControlBusy||autoplayStopBusy||active||!s.run_id;
+ E("autoplayPause").disabled=autoplayControlBusy||["stopped","paused"].includes(s.phase);E("autoplayStop").disabled=autoplayStopBusy||(s.phase==="stopped"&&!autoplayControlBusy);
  E("autoplayReview").disabled=autoplayControlBusy||!s.pending;
 }
 async function refreshAutoplay(){
@@ -53,7 +69,17 @@ async function refreshAutoplay(){
  catch(e){E("autoplayStatus").textContent="Não foi possível ler o agente: "+e.message;return null;}
 }
 async function controlAutoplay(action,goal){
- if(autoplayControlBusy)return null;autoplayControlBusy=true;let failedNotice=null;
+ // Stop has its own lane: never wait for a start, tick, GET or model response.
+ if(action==="stop"||action==="pause"){
+  if(autoplayStopBusy)return null;autoplayStopBusy=true;let stopError=null;
+  if(autoplayData)renderAutoplay(autoplayData);
+  E("autoplayStatus").textContent="Parando novas ações…";
+  try{const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action,revision:autoplayData?.state?.revision||0})});renderAutoplay(data);autoplayPollingFailed=false;return data;}
+  catch(e){autoplayPollingFailed=true;stopError="Parada não confirmada: "+e.message;return null;}
+  finally{autoplayStopBusy=false;if(autoplayData)renderAutoplay(autoplayData);if(stopError)E("autoplayStatus").textContent=stopError;}
+ }
+ if(autoplayControlBusy||autoplayStopBusy)return null;autoplayControlBusy=true;let failedNotice=null;
+ if(autoplayData)renderAutoplay(autoplayData);
  try{
   const current=await refreshAutoplay();if(!current)throw Error("Estado indisponível");
   const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action,revision:current.state.revision,...(action==="start"||action==="resume"?{goal:goal||E("autoplayGoal").value,channel_id:S.current}:{})})});
@@ -63,7 +89,7 @@ async function controlAutoplay(action,goal){
 }
 async function autoplayTick(){
  const s=autoplayData?.state;
- if(autoplayPollingFailed||autoplayTickBusy||autoplayControlBusy||document.visibilityState!=="visible"||!autoplayData?.integration?.configured||!["running","waiting","confirming"].includes(s?.phase)||s.next_tick_at>Date.now())return;
+ if(autoplayPollingFailed||autoplayTickBusy||autoplayControlBusy||autoplayStopBusy||document.visibilityState!=="visible"||!autoplayData?.integration?.configured||!["running","waiting","confirming"].includes(s?.phase)||s.next_tick_at>Date.now())return;
  autoplayTickBusy=true;
  try{const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action:"tick",revision:s.revision})});renderAutoplay(data);}
  catch(e){await refreshAutoplay();autoplayPollingFailed=true;E("autoplayStatus").textContent="Acompanhamento interrompido: "+e.message;}

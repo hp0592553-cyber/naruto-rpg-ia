@@ -56,6 +56,8 @@ last_game_message = None
 connection = None
 channel = None
 commands = []
+# Optional service fence, called after discovery/validation and before any send.
+before_send = None
 state = {'character_connected': False, 'command_attempted': False, 'command_sent': False,
          'command_completed': False, 'rpg_state_verified': False}
 
@@ -249,6 +251,8 @@ async def consult(command_path="missoes minhas", options=None):
             await received.put(message)
     client.receiver = on_message
     try:
+        if before_send is not None and not await before_send():
+            return {**state, 'status': 'stopped_before_send'}
         interaction = await asyncio.wait_for(command(channel, **prepared), timeout=45)
         interaction_id = getattr(interaction, 'id', None)
         state.update(command_sent=True, interaction_id=str(interaction_id) if interaction_id else None)
@@ -322,6 +326,8 @@ async def component_action(options):
             await received.put(msg)
     client.receiver = receive
     try:
+        if before_send is not None and not await before_send():
+            return {'command_completed': False, 'status': 'stopped_before_send'}
         interaction = await asyncio.wait_for(target.click() if raw['type'] == 2 else target.choose(*selected), 45)
         deadline = asyncio.get_running_loop().time() + 35
         while asyncio.get_running_loop().time() < deadline:

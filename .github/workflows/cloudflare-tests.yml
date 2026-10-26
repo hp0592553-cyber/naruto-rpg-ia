@@ -19,3 +19,7 @@ jobs:
       - run: node --test cloudflare/tests/*.test.mjs
       - name: Verificar sintaxe da ponte Codex CLI
         run: python3 -m py_compile scripts/codex_bridge.py
+      - name: Verificar cancelamento e presença do executor sem Discord
+        run: |
+          python3 -m py_compile scripts/command_service.py scripts/naruto_guarded_mcp.py
+          python3 -m unittest discover -s scripts -p 'test_command_service.py'

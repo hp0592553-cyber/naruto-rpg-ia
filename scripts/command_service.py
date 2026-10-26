@@ -5,11 +5,14 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
+import uuid
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 BASE = 'https://bushin-discord-direct.henrique-silva081106.workers.dev'
 SESSION_TOKEN = None
+INSTANCE_ID = str(uuid.uuid4())
 
 
 def enroll_github():
@@ -96,6 +99,11 @@ async def execute_job(executor, job, state_dir):
     executor.state.update(command_attempted=False, command_sent=False, command_completed=False)
     executor.state.pop('response', None)
     executor.state.pop('interaction_id', None)
+    async def before_send():
+        # Never retry authorization: a lost response may already have granted it.
+        granted = await asyncio.to_thread(request, 'authorize', {'request_id': request_id})
+        return granted.get('authorized') is True
+    executor.before_send = before_send
     try:
         connected = await executor.status()
         if connected.get('status') != 'connected':
@@ -106,12 +114,27 @@ async def execute_job(executor, job, state_dir):
             outcome = await executor.consult(data['command'], data['options'])
     except Exception:
         outcome = {'command_completed': False}
+    finally:
+        executor.before_send = None
     result = {'request_id': request_id}
     if outcome.get('command_completed') is True and outcome.get('response'):
         result['response'] = outcome['response']
     path = state_dir / 'pending-result.json'
     store_result(path, result)
     await deliver(path)
+
+
+async def heartbeat(executor, deadline):
+    """Keep presence current while commands and result delivery are awaiting I/O."""
+    while executor.client.is_ready() and asyncio.get_running_loop().time() < deadline:
+        try:
+            await asyncio.to_thread(request, 'heartbeat', {
+                'owner_id': str(executor.client.user.id), 'ready': True, 'version': 3, 'instance_id': INSTANCE_ID,
+                'expires_at': int((time.time() + max(0, deadline - asyncio.get_running_loop().time())) * 1000),
+            })
+        except RuntimeError:
+            pass
+        await asyncio.sleep(10)
 
 
 async def main():
@@ -130,17 +153,19 @@ async def main():
     state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(state_dir, 0o700)
     pending = state_dir / 'pending-result.json'
+    presence = None
     try:
-        if pending.exists():
-            await deliver(pending)
         connected = await executor.status()
         if connected.get('status') != 'connected':
             raise SystemExit('Discord connection unavailable; nothing sent')
         print('Command service connected', flush=True)
         deadline = asyncio.get_running_loop().time() + (25*60 if github else 365*24*3600)
+        presence = asyncio.create_task(heartbeat(executor, deadline))
+        if pending.exists():
+            await deliver(pending)
         while executor.client.is_ready() and asyncio.get_running_loop().time() < deadline:
             try:
-                result = await asyncio.to_thread(request, 'poll', {'owner_id': str(executor.client.user.id), 'ready': True, 'version': 2})
+                result = await asyncio.to_thread(request, 'poll', {'owner_id': str(executor.client.user.id), 'ready': True, 'version': 3, 'instance_id': INSTANCE_ID})
             except RuntimeError:
                 await asyncio.sleep(5)
                 continue
@@ -150,6 +175,9 @@ async def main():
             else:
                 await asyncio.sleep(1)
     finally:
+        if presence:
+            presence.cancel()
+            await asyncio.gather(presence, return_exceptions=True)
         await executor.client.close()
         if executor.connection:
             executor.connection.cancel()

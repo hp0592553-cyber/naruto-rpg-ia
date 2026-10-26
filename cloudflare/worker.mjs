@@ -921,7 +921,19 @@ export default {
         }
         if(path==="/mobile/discord2/api/search/mine"&&req.method==="POST")return await searchHenriqueMessages(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/ai/scan"&&req.method==="POST")return await scanRpgChannels(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
-        if(path==="/mobile/discord2/api/autoplay")return playerRoute(req,env,ctx,{reply,baseUrl:base(env),seal,unseal});
+        if(path==="/mobile/discord2/api/autoplay")return playerRoute(req,env,ctx,{reply,baseUrl:base(env),seal,unseal,listChannels:async()=>{
+          // Read membership again after travel; the initial mobile session is not a role snapshot.
+          const auth=await unseal(row.creds_encrypted,env);
+          if(auth.expires<=now()+30000)return {listed:false,reason:"Login Discord expirado. Entre novamente pelo Bushin."};
+          const [member,guilds]=await Promise.all([
+            discordFetch(auth.access,"/users/@me/guilds/"+NARUTO_GUILD_ID+"/member"),
+            discordFetch(auth.access,"/users/@me/guilds")
+          ]);
+          const guild=Array.isArray(guilds)?guilds.find(g=>String(g.id)===NARUTO_GUILD_ID):null;
+          const permissions=guild?.permissions??guild?.permissions_new;
+          if(!Array.isArray(member?.roles)||!/^\d+$/.test(String(permissions??"")))return {listed:false,reason:"Não foi possível conferir os cargos atuais do Henrique."};
+          return personalListChannels(env,{...ctx,channelVisibility:{memberId:row.user_id,roles:member.roles,basePermissions:String(permissions)}});
+        }});
         if(path==="/mobile/discord2/api/game-room")return gameRoomRoute(req,env,ctx,{reply,baseUrl:base(env),plan:async channel_id=>{
           const result=await bushinAiNext(new Request(base(env)+"/mobile/discord2/api/ai/next",{
            method:"POST",headers:{origin:base(env),"content-type":"application/json"},

@@ -3,6 +3,7 @@ import {changeAutoplay,readAutoplay,recordAutoplay} from './autoplay-store.mjs';
 import {commandServiceHealth,commandServiceMobile,startCommandSession} from './command-service.mjs';
 import {personalInspectCommand,personalListChannels,personalCall} from './personal-discord.mjs';
 import {chatContext,replyTarget,replyText} from './player-context.mjs';
+import {responseSnapshot} from './rpg-agent.mjs';
 const CHANNEL='1520114348079583263',MODEL='@cf/meta/llama-3.1-8b-instruct-fp8';
 const kinds=/^\/(perfil ver|nivel|mapa|missoes (minhas|ativas|diarias)|viajar|acao coletar|interagir npc)$/;
 // Catalog traversal uses a slash joined directly to the root.
@@ -10,7 +11,7 @@ export function playerCommands(catalog){const walk=(n,p)=>{const path=p?n.name?p
 export function forestControl(controls){const key=s=>String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase();for(const c of controls||[]){if(c.disabled||c.url)continue;if(c.type===2&&key(c.label).includes('floresta'))return {control:c,values:[]};if(c.type===3){const option=c.options?.find(o=>key(o.label).includes('floresta'));if(option)return {control:c,values:[option.value]};}}return null;}
 export function ownComponentOptions(options,last){const result={...options};const controls=(last?.controls||[]).filter(c=>!c.disabled&&!c.url&&[2,3].includes(c.type));if(!result.custom_id&&controls.length===1)result.custom_id=controls[0].custom_id;const target=controls.find(c=>c.custom_id===result.custom_id);if(!target)throw Error('A IA não escolheu uma opção da última caixa.');if(result.message_id&&result.message_id!==last.message_id)throw Error('Caixa desatualizada.');result.message_id=last.message_id;if(!Object.hasOwn(result,'values')&&target.type===2)result.values='[]';return result;}
 export function travelArrival(text){if(!/Viagem iniciada|Chegada automática/i.test(text||''))return null;const stamp=String(text).match(/<t:(\d{10}):[FRf]> /)||String(text).match(/<t:(\d{10}):[FRf]>/);return stamp?Number(stamp[1])*1000:null;}
-export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readChat=personalCall,sendChat=personalCall}){
+export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readChat=personalCall,sendChat=personalCall,listChannels=personalListChannels}){
  const owner=String(ctx.me?.id||'');const HEAD={'cache-control':'no-store'};
  if(owner!==String(env.BUSHIN_OWNER_DISCORD_ID)||ctx.me?.membership?.member!==true)return reply({error:'Conta não autorizada'},403,HEAD);
  const view=state=>({state,integration:{configured:true,missing:[]},note:'Ativo enquanto esta página estiver aberta e o executor estiver conectado.'});
@@ -22,6 +23,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
  const update=fn=>changeAutoplay(env,owner,fn);
  const request=(path,body)=>new Request(baseUrl+'/mobile/discord2/api/ai/'+path,{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify(body)});
  const service=async body=>{const r=await commandServiceMobile(request('opencode',body),env,ctx,{unseal,baseUrl});const v=await r.json();if(!r.ok)throw Error(v.error||'Executor indisponível');return v};
+ const lookup=async id=>(await commandServiceMobile(new Request(baseUrl+'/mobile/discord2/api/ai/opencode'+(id?'?request_id='+encodeURIComponent(id):'')),env,ctx,{unseal,baseUrl})).json();
  if(action==='stop'||action==='pause'){
   const next=await update(d=>{d.phase='stopped';d.code=null;d.reason='Parado. Uma ação já recebida pelo jogo pode terminar.';d.run_id=null;d.lease=null;return d});
   try{await service({action:'stop'})}catch{}
@@ -30,14 +32,19 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
  if(action==='start'||action==='resume'){
   if(['running','waiting','confirming'].includes(saved.state.phase)&&saved.state.run_id)return reply(view(saved.state),200,HEAD);
   if(data.channel_id!==undefined&&!/^[0-9]{15,22}$/.test(data.channel_id))return reply({error:'Canal inválido'},400,HEAD);
+  let startRevision=saved.state.revision;
   if(saved.state.pending){
-   const r=await commandServiceMobile(new Request(baseUrl+'/mobile/discord2/api/ai/opencode'),env,ctx,{unseal,baseUrl});const old=await r.json(),p=saved.state.pending;
-   if(old.request_id!==p.id||!['finished','stopped'].includes(old.state))return reply({error:'Ainda há uma ação pendente. Nenhum reenvio foi feito.'},409,HEAD);
-   await update(d=>{if(d.pending?.id!==p.id)return null;d.pending=null;d.refresh_menu=!old.confirmed&&!!d.last_result?.response?.controls?.length;d.completed_keys.push(p.action.command);d.player_observations=(d.player_observations||[]).concat([{command:p.action.command,channel_id:p.action.channel_id||CHANNEL,text:old.confirmed?(old.response?.normalized_text||'Resposta recebida'):'Resultado incerto. Não repetir esta ação.'}]);if(old.confirmed&&old.response)d.last_result={operation_id:p.id,at:Date.now(),response:old.response};return d});
+   const p=saved.state.pending,old=await lookup(p.id);
+   if(old.request_id!==p.id||!['finished','stopped','uncertain','unknown'].includes(old.state))return reply({error:'Ainda há uma ação pendente. Nenhum reenvio foi feito.'},409,HEAD);
+   const reconciled=await update(d=>{if(d.pending?.id!==p.id||d.revision!==saved.state.revision)return null;d.pending=null;d.refresh_observation=!old.confirmed;if(old.state!=='stopped')d.completed_keys.push(p.action.command);d.player_observations=(d.player_observations||[]).concat([{command:p.action.command,channel_id:p.action.channel_id||CHANNEL,text:old.confirmed?(old.response?.normalized_text||'Resposta recebida'):'Resultado incerto. Não repetir esta ação.'}]).slice(-30);if(!old.confirmed&&old.state!=='stopped')d.uncertain_actions=(d.uncertain_actions||[]).concat(p.action).slice(-100);if(old.confirmed&&old.response)d.last_result={operation_id:p.id,at:Date.now(),response:old.response};return d});
+   if(!reconciled.changed)return reply(view(reconciled.state),200,HEAD);startRevision=reconciled.state.revision;
   }
   const online=(await commandServiceHealth(env)).online;
   if(!online){const r=await startCommandSession(request('command-session',{}),env,ctx,baseUrl);if(!r.ok)return r}
-  const next=await update(d=>{d.context_channel_id=data.channel_id||d.context_channel_id||CHANNEL;d.chat_started_at=Date.now();d.lease=null;d.phase=online?'running':'waiting';d.reason=online?'Lendo sua ficha e o estado do jogo.':'Conectando o executor. Nenhuma ação enviada ainda.';d.code=null;d.run_id=crypto.randomUUID();d.steps=0;if(!d.player_observations?.length){d.completed_keys=[];d.player_observations=[];}d.next_tick_at=Date.now()+1000;return d});return reply(view(next.state),200,HEAD);
+  const baseline=(await readAutoplay(env,owner)).state;
+  // A stop arriving during session setup must win over this older start.
+  if(baseline.revision!==startRevision)return reply(view(baseline),200,HEAD);
+  const next=await update(d=>{if(d.revision!==baseline.revision)return null;d.context_channel_id=data.channel_id||d.context_channel_id||CHANNEL;d.chat_started_at=Date.now();d.lease=null;d.phase=online?'running':'waiting';d.reason=online?'Lendo sua ficha e o estado do jogo.':'Conectando o executor. Nenhuma ação enviada ainda.';d.code=null;d.run_id=crypto.randomUUID();d.steps=0;if(!d.player_observations?.length){d.completed_keys=[];d.player_observations=[];}d.next_tick_at=Date.now()+1000;return d});return reply(view(next.state),200,HEAD);
  }
  if(!['running','waiting','confirming'].includes(saved.state.phase))return reply(view(saved.state),200,HEAD);
  if(saved.state.lease&&saved.state.lease.until>Date.now())return reply(view(saved.state),200,HEAD);
@@ -47,20 +54,39 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
  const commit=fn=>update(d=>{if(d.run_id!==run||d.lease?.id!==lock)return null;fn(d);d.lease=null;return d});
  try{
   if(saved.state.pending){
-   const r=await commandServiceMobile(new Request(baseUrl+'/mobile/discord2/api/ai/opencode'),env,ctx,{unseal,baseUrl});const result=await r.json();
+   const result=await lookup(saved.state.pending.id);
    const pending=saved.state.pending;
    if(result.request_id!==pending.id||result.command!==pending.action.command)throw Error('A resposta não corresponde ao comando pendente.');
+   if(['uncertain','unknown','stopped'].includes(result.state))throw Error('A ação terminou sem resultado confirmado. Não vou repeti-la.');
    if(result.state!=='finished'){const next=await commit(d=>{d.reason='Aguardando a resposta de '+pending.action.command;d.next_tick_at=Date.now()+2000});return reply(view(next.state),200,HEAD)}
    if(!result.confirmed||!result.response)throw Error('O jogo não confirmou o resultado. Não vou repetir o comando.');
-   const next=await commit(d=>{d.steps++;d.completed_keys.push(pending.action.command);d.player_observations=(d.player_observations||[]).concat([{command:pending.action.command,channel_id:result.response.channel_id,text:result.response.normalized_text||result.response.content||'',controls:result.response.controls||[]}]).slice(-8);d.last_result={operation_id:pending.id,at:Date.now(),response:result.response};d.pending=null;d.phase='running';d.reason='Resposta recebida. Escolhendo a próxima ação.';d.next_tick_at=Date.now()+1500;recordAutoplay(d,'confirmed',pending.action.command)});return reply(view(next.state),200,HEAD);
+   const snapshot=responseSnapshot({command:pending.action.command,request_id:pending.id},result.response,owner);
+   const next=await commit(d=>{d.steps++;d.completed_keys.push(pending.action.command);d.player_observations=(d.player_observations||[]).concat([{command:pending.action.command,channel_id:result.response.channel_id,text:result.response.normalized_text||result.response.content||'',controls:result.response.controls||[]}]).slice(-30);d.last_result={operation_id:pending.id,at:Date.now(),response:result.response};if(snapshot&&Object.keys(snapshot.stats).length)d.snapshot={...snapshot,stats:{...(d.snapshot?.stats||{}),...Object.fromEntries(Object.entries(snapshot.stats).map(([k,v])=>[k,['hp','chakra','energy'].includes(k)?{current:v.value,max:v.max}:v.value]))}};d.pending=null;d.phase=d.snapshot?.stats?.level>=d.goal_level?'completed':'running';d.reason=d.phase==='completed'?'Nível alvo confirmado na resposta do jogo.':'Resposta recebida. Escolhendo a próxima ação.';d.next_tick_at=d.phase==='completed'?0:Date.now()+1500;recordAutoplay(d,'confirmed',pending.action.command)});return reply(view(next.state),200,HEAD);
   }
-  if(!(await commandServiceHealth(env)).online){const next=await commit(d=>{d.phase='waiting';d.reason='Executor desconectado. Nenhum comando enviado.';d.next_tick_at=Date.now()+5000});return reply(view(next.state),200,HEAD)}
+  if(!(await commandServiceHealth(env)).online){
+   if(Date.now()>=(saved.state.reconnect_at||0)){
+    const renewed=await startCommandSession(request('command-session',{}),env,ctx,baseUrl);const connection=await renewed.json();
+    const next=await commit(d=>{d.phase='waiting';d.reason=connection.error||connection.note||'Reconectando o executor. Nenhum comando reenviado.';d.reconnect_at=Date.now()+120000;d.next_tick_at=Date.now()+5000});return reply(view(next.state),200,HEAD);
+   }
+   const next=await commit(d=>{d.phase='waiting';d.reason='Executor desconectado. Aguardando a sessão solicitada; nenhum comando reenviado.';d.next_tick_at=Date.now()+5000});return reply(view(next.state),200,HEAD);
+  }
   const arrival=travelArrival(saved.state.last_result?.response?.normalized_text)||(saved.state.player_observations||[]).map(x=>travelArrival(x.text)).filter(Boolean).at(-1);
   if(arrival&&Date.now()<arrival+5000){const next=await commit(d=>{d.phase='waiting';d.reason='Viagem confirmada. Aguardando a chegada informada pelo jogo.';d.next_tick_at=arrival+5000});return reply(view(next.state),200,HEAD)}
-  if(saved.state.steps>=12)throw Error('Limite de ações desta sessão atingido.');
+  if(saved.state.steps>=saved.state.max_steps)throw Error('Limite de ações desta sessão atingido sem confirmação do nível alvo.');
   const contextChannel=saved.state.context_channel_id||CHANNEL;
   const history=await readChat(env,'bushin_naruto_personal_read',{channel_id:contextChannel,limit:12},ctx);
-  if(!history.read)throw Error(history.reason||'Não foi possível ler o contexto atual do chat.');
+  if(!history.read){
+   if([403,404].includes(Number(history.code))){
+    const listed=await listChannels(env,ctx);
+    if(!listed.listed||!listed.visibility_filtered)throw Error('Não foi possível atualizar os canais permitidos após a mudança de acesso.');
+    const readable=listed.channels.filter(c=>[0,5].includes(Number(c.type))&&c.id!==contextChannel);
+    const route=readable.find(c=>String(c.name).normalize('NFKD').toLowerCase().includes('caminho'))||readable.find(c=>c.id===CHANNEL);
+    if(!route)throw Error('O canal anterior ficou indisponível e o jogo ainda não liberou um canal de caminho ou comandos.');
+    const next=await commit(d=>{d.context_channel_id=route.id;d.site_action={id:crypto.randomUUID(),type:'channel',channel_id:route.id};d.reason='Acesso mudou. Canal permitido atualizado; vou ler o contexto antes de agir.';d.phase='waiting';d.next_tick_at=Date.now()+3000;recordAutoplay(d,'access_changed',route.id)});
+    return reply(view(next.state),200,HEAD);
+   }
+   throw Error(history.reason||'Não foi possível ler o contexto atual do chat.');
+  }
   const conversation=chatContext(history.messages);
   const target=replyTarget(history.messages,owner,saved.state.chat_started_at||Date.now(),saved.state.reserved_reply_ids||[]);
   if(target){
@@ -68,6 +94,8 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
    const text=replyText(answer.response,target);
    const reservation=await update(d=>{if(d.run_id!==run||d.lease?.id!==lock||d.phase==='stopped'||(d.reserved_reply_ids||[]).includes(target.id))return null;d.reserved_reply_ids=(d.reserved_reply_ids||[]).concat(target.id).slice(-100);return d});
    if(!reservation.changed)return reply(view(reservation.state),200,HEAD);
+   const beforeChat=(await readAutoplay(env,owner)).state;
+   if(beforeChat.run_id!==run||beforeChat.lease?.id!==lock||beforeChat.phase==='stopped')return reply(view(beforeChat),200,HEAD);
    const sent=await sendChat(env,'bushin_naruto_personal_send',{channel_id:contextChannel,text,mention_ids:[target.author_id],reply_to:target.id,confirmed:true},ctx);
    if(sent.sent!==true)throw Error(sent.reason||'O Discord não confirmou a mensagem. Não vou repetir.');
    const next=await commit(d=>{d.steps++;d.reason='Resposta enviada no chat com marcação do autor.';d.last_chat_reply={id:sent.message_id,channel_id:contextChannel,text};d.next_tick_at=Date.now()+20000;recordAutoplay(d,'chat_sent','Resposta à mensagem '+target.id)});return reply(view(next.state),200,HEAD);
@@ -77,17 +105,17 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   const available=playerCommands(registry.commands).filter(x=>!saved.state.completed_keys.includes(x.command)||['/viajar','/acao coletar','/mapa'].includes(x.command));
   const currentResponse=await (await commandServiceMobile(new Request(baseUrl+'/mobile/discord2/api/ai/opencode'),env,ctx,{unseal,baseUrl})).json();
   const stored=saved.state.last_result;
-  const fresh=!!stored&&currentResponse.state==='finished'&&currentResponse.confirmed&&currentResponse.request_id===stored.operation_id&&currentResponse.response?.message_id===stored.response?.message_id;
+  const fresh=!!stored&&currentResponse.state==='finished'&&currentResponse.confirmed&&currentResponse.controls_current!==false&&currentResponse.request_id===stored.operation_id&&currentResponse.response?.message_id===stored.response?.message_id;
   const staleBox=!!stored?.response?.controls?.length&&!fresh;
   const last=fresh?currentResponse.response:null;
   const controls=(last?.controls||[]).filter(c=>!c.disabled&&!c.url&&[2,3].includes(c.type));
   available.push({command:'/navigate',description:'Selecionar e ler outro canal acessível no site, sem enviar mensagem.',options:[]});
   if(controls.length)available.push({command:'/component',description:'Usar somente uma das caixas da última resposta própria',options:[{name:'message_id',type:3,required:true},{name:'custom_id',type:3,required:true},{name:'values',type:3,required:true}]});
-  const seed=['/perfil ver','/missoes minhas','/missoes ativas'].find(x=>!saved.state.completed_keys.includes(x)&&available.some(c=>c.command===x));
+  const seed=!saved.state.refresh_observation&&['/perfil ver','/nivel','/missoes minhas','/missoes ativas'].find(x=>!saved.state.completed_keys.includes(x)&&available.some(c=>c.command===x));
   let selected=seed?{command:seed,options:{},channel_id:CHANNEL}:null;
   let channels=[{id:CHANNEL,name:'Comandos'}];
   if(!selected){
-   const listed=await personalListChannels(env,ctx);if(listed.listed&&Array.isArray(listed.channels))channels=listed.channels.filter(x=>[0,5].includes(Number(x.type))).map(x=>({id:String(x.id),name:x.name}));
+   const listed=await listChannels(env,ctx);if(listed.listed&&Array.isArray(listed.channels))channels=listed.channels.filter(x=>[0,5].includes(Number(x.type))).map(x=>({id:String(x.id),name:x.name}));else throw Error(listed.reason||'Não foi possível conferir os canais disponíveis.');
    const context=(saved.state.player_observations||[]).map(x=>({...x,text:x.text.slice(0,2200)}));
    const key=s=>String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
    const forest=channels.find(c=>key(c.name).includes('floresta')&&!key(c.name).includes('caminho'));
@@ -95,7 +123,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
    const refused=context.some(x=>x.command==='/viajar'&&/viagem indisponível|canais permitidos/i.test(x.text));
    const menu=forestControl(controls);
    const npc=controls.length===1&&controls[0].type===2&&String(controls[0].custom_id).startsWith('interagir:')?controls[0]:null;
-   if(staleBox&&channels.some(c=>c.id===stored.response.channel_id)&&available.some(c=>c.command==='/mapa'))selected={command:'/mapa',channel_id:stored.response.channel_id,options:{},refresh_read:true};
+   if(saved.state.refresh_observation||staleBox){const channel=channels.some(c=>c.id===contextChannel)?contextChannel:CHANNEL;if(!available.some(c=>c.command==='/mapa'))throw Error('Não há consulta de mapa verificada para atualizar o contexto.');selected={command:'/mapa',channel_id:channel,options:{},refresh_read:true};}
    else if(arrival&&available.some(c=>c.command==='/mapa')&&!(saved.state.player_observations||[]).some(x=>x.command==='/mapa'&&forest&&x.channel_id===forest.id)){if(!forest)throw Error('A chegada ainda não liberou o canal da Floresta. Aguarde o jogo atualizar seus cargos.');selected={command:'/mapa',options:{},channel_id:forest.id};}
    else if(gate&&(saved.state.refresh_menu||refused&&!context.some(x=>x.command==='/viajar'&&x.channel_id===gate.id)))selected={command:'/viajar',options:{},channel_id:gate.id};
    else if(menu){selected={command:'/component',channel_id:last.channel_id,options:{message_id:last.message_id,custom_id:menu.control.custom_id,values:JSON.stringify(menu.values)}};}
@@ -112,6 +140,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   selected.channel_id=selected.channel_id||CHANNEL;
   if(selected.command==='/component'){selected.channel_id=last.channel_id;selected.options=ownComponentOptions(selected.options||{},last);const key=JSON.stringify([last.message_id,selected.options.custom_id,selected.options.values]);if((saved.state.completed_components||[]).includes(key))throw Error('Esta opção já foi usada nesta mensagem.');selected.component_key=key;}
   if(!channels.some(c=>c.id===selected.channel_id))throw Error('A IA não escolheu um canal acessível.');
+  if(!selected.refresh_read&&(saved.state.uncertain_actions||[]).some(x=>x.command===selected.command&&x.channel_id===selected.channel_id))throw Error('Uma tentativa dessa ação ficou incerta nesse canal. Nenhum reenvio foi feito.');
   if(selected.command!=='/component'&&!selected.refresh_read&&!(saved.state.refresh_menu&&selected.command==='/viajar')&&(saved.state.player_observations||[]).some(x=>x.command===selected.command&&(x.channel_id||CHANNEL)===selected.channel_id))throw Error('Esta ação já foi conferida nesse canal; não vou repeti-la.');
   const definition=available.find(x=>x.command===selected.command);
   const fields=definition.options||[],options=selected.options||{};
@@ -124,7 +153,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
    if(selected.channel_id===contextChannel)throw Error('Este canal já está selecionado.');
    const next=await commit(d=>{d.context_channel_id=selected.channel_id;d.site_action={id:crypto.randomUUID(),type:'channel',channel_id:selected.channel_id};d.steps++;d.reason='Canal selecionado. Lendo o contexto antes da próxima ação.';d.next_tick_at=Date.now()+1500;recordAutoplay(d,'channel_selected',selected.channel_id)});return reply(view(next.state),200,HEAD);
   }
-  const result=await service({action:'start',command_request:{command:selected.command,channel_id:selected.channel_id,options:selected.options||{}}});
-  const next=await commit(d=>{d.context_channel_id=selected.channel_id;d.site_action={id:result.request_id,type:'channel',channel_id:selected.channel_id};d.refresh_menu=false;if(selected.component_key)d.completed_components=(d.completed_components||[]).concat(selected.component_key).slice(-100);d.pending={id:result.request_id,action:{label:selected.command,command:selected.command,channel_id:selected.channel_id},stages:{requested:true,sent:false}};d.phase='confirming';d.reason='Executando '+selected.command;d.next_tick_at=Date.now()+2000;recordAutoplay(d,'requested',selected.command)});if(!next.changed){try{await service({action:'stop'})}catch{}}return reply(view(next.state),200,HEAD);
+  const result=await service({action:'start',run_id:run,command_request:{command:selected.command,channel_id:selected.channel_id,options:selected.options||{}}});
+  const next=await commit(d=>{d.context_channel_id=selected.channel_id;d.site_action={id:result.request_id,type:'channel',channel_id:selected.channel_id};d.refresh_menu=false;d.refresh_observation=false;if(selected.component_key)d.completed_components=(d.completed_components||[]).concat(selected.component_key).slice(-100);d.pending={id:result.request_id,action:{label:selected.command,command:selected.command,channel_id:selected.channel_id},stages:{requested:true,sent:false}};d.phase='confirming';d.reason='Executando '+selected.command;d.next_tick_at=Date.now()+2000;recordAutoplay(d,'requested',selected.command)});if(!next.changed){try{await service({action:'stop'})}catch{}}return reply(view(next.state),200,HEAD);
  }catch(e){const next=await commit(d=>{d.phase='blocked';d.code='player_paused';d.reason=String(e.message).slice(0,300);d.next_tick_at=0});return reply(view(next.state),200,HEAD)}
 }

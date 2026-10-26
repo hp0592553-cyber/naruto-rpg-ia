@@ -34,3 +34,42 @@ test('stopping a queued job prevents claiming it',async()=>{
  await commandServiceMobile(req('/api',{action:'stop'}),env,ctx,helpers);
  assert.equal((await (await poll(env)).json()).job,null);
 });
+test('Stop cancels a claimed v3 job before authorization; no new send grant is issued',async()=>{
+ const {env}=fixture();await poll(env);
+ await commandServiceMobile(req('/api',{action:'start',command_request:command}),env,ctx,helpers);
+ const claim=await (await commandServiceRunner(req('/bridge/commands/poll',{owner_id:owner,ready:true,version:3,instance_id:'runner-A'}),env,helpers)).json();
+ assert.ok(claim.job);
+ assert.equal((await (await commandServiceMobile(req('/api',{action:'stop'}),env,ctx,helpers)).json()).stopped,true);
+ const granted=await (await commandServiceRunner(req('/bridge/commands/authorize',{request_id:claim.job.request_id}),env,helpers)).json();
+ assert.equal(granted.authorized,false);
+});
+test('authorization is one-shot; Stop preserves in-flight action and archived result survives a newer job',async()=>{
+ const {env}=fixture();await poll(env);
+ const start=async()=> (await commandServiceMobile(req('/api',{action:'start',command_request:command}),env,ctx,helpers)).json();
+ const job=await start();await poll(env);
+ const grant=()=>commandServiceRunner(req('/bridge/commands/authorize',{request_id:job.request_id}),env,helpers);
+ assert.equal((await (await grant()).json()).authorized,true);
+ assert.equal((await (await grant()).json()).authorized,false);
+ assert.equal((await (await commandServiceMobile(req('/api',{action:'stop'}),env,ctx,helpers)).json()).stopped,false);
+ const response={message_id:'1564274391158751294',author_id:bot,channel_id:channel,components:[{type:10,content:'Confirmed old result'}],embeds:[]};
+ await commandServiceRunner(req('/bridge/commands/result',{request_id:job.request_id,response}),env,helpers);
+ const newer=await start();assert.notEqual(newer.request_id,job.request_id);
+ const old=await (await commandServiceMobile(new Request('https://example.test/api?request_id='+job.request_id),env,ctx,helpers)).json();
+ assert.equal(old.request_id,job.request_id);assert.equal(old.confirmed,true);assert.equal(old.response.message_id,response.message_id);
+});
+test('lost legacy claimed action becomes uncertain, never requeued, and can receive a late result',async()=>{
+ const {env,rows}=fixture();
+ const request_id=crypto.randomUUID();rows.set('discord2_service_job_v1',JSON.stringify({request_id,request:command,phase:'claimed',at:Date.now()-200000,claimed_at:Date.now()-190000,protocol:2}));
+ let result=await (await commandServiceMobile(new Request('https://example.test/api'),env,ctx,helpers)).json();assert.equal(result.state,'uncertain');
+ assert.equal(JSON.parse(rows.get('discord2_service_job_v1')).phase,'uncertain');
+ await commandServiceRunner(req('/bridge/commands/result',{request_id,response:{message_id:'1564274391158751294',author_id:bot,channel_id:channel,components:[{type:10,content:'Late response'}],embeds:[]}}),env,helpers);
+ result=await (await commandServiceMobile(new Request('https://example.test/api?request_id='+request_id),env,ctx,helpers)).json();assert.equal(result.confirmed,true);
+});
+test('a renewed executor cannot click controls captured by an earlier process',async()=>{
+ const {env,rows}=fixture();await commandServiceRunner(req('/bridge/commands/heartbeat',{owner_id:owner,ready:true,version:3,instance_id:'runner-B'}),env,helpers);
+ const response={message_id:'1564274391158751294',channel_id:channel,controls:[{type:2,custom_id:'real-button'}]};
+ rows.set('discord2_service_job_v1',JSON.stringify({request_id:crypto.randomUUID(),request:command,phase:'finished',confirmed:true,executor_id:'runner-A',sealed:{response}}));
+ const state=await (await commandServiceMobile(new Request('https://example.test/api'),env,ctx,helpers)).json();assert.equal(state.controls_current,false);
+ const r=await commandServiceMobile(req('/api',{action:'start',command_request:{command:'/component',channel_id:channel,options:{message_id:response.message_id,custom_id:'real-button',values:'[]'}}}),env,ctx,helpers);
+ assert.equal(r.status,409);
+});
