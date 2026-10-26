@@ -21,6 +21,7 @@ import {personalListChannels} from "./personal-discord.mjs";
 import {personalInspectCommand,personalInvokeProfileProbe} from "./personal-discord.mjs";
 import {PANEL_HTML,PANEL_JS} from "./discord2-ui.mjs";
 import {agentRoute,recordCommandEvidence} from "./rpg-agent.mjs";
+import {gameRoomRoute} from "./game-room.mjs";
 import {normalizeMessage} from "./message-normalizer.mjs";
 import {bushinAiNext} from "./discord2-ai.mjs";
 import {codexBridgeMobile,codexBridgeAgent} from "./codex-bridge.mjs";
@@ -913,7 +914,15 @@ export default {
         }
         if(path==="/mobile/discord2/api/search/mine"&&req.method==="POST")return await searchHenriqueMessages(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/ai/scan"&&req.method==="POST")return await scanRpgChannels(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
-        if(path==="/mobile/discord2/api/agent")return agentRoute(req,env,ctx,{reply,baseUrl:base(env),plan:async channel_id=>{
+        if(path==="/mobile/discord2/api/game-room")return gameRoomRoute(req,env,ctx,{reply,baseUrl:base(env),plan:async channel_id=>{
+          const result=await bushinAiNext(new Request(base(env)+"/mobile/discord2/api/ai/next",{
+           method:"POST",headers:{origin:base(env),"content-type":"application/json"},
+           body:JSON.stringify({channel_id,autoplay:true,avoid_commands:[],question:"Escolha uma próxima consulta segura para verificar a ficha ou missão do Henrique. Somente planeje, não execute comandos ou combate."})
+          }),env,ctx,{reply,personalCall,baseUrl:base(env)});
+          const data=await result.json();
+          return result.ok?{ok:true,result:data}:{ok:false,error:data.error||"IA não concluiu análise."};
+         }});
+         if(path==="/mobile/discord2/api/agent")return agentRoute(req,env,ctx,{reply,baseUrl:base(env),plan:async channel_id=>{
           const result=await bushinAiNext(new Request(base(env)+"/mobile/discord2/api/ai/next",{method:"POST",headers:{origin:base(env),"content-type":"application/json"},body:JSON.stringify({channel_id,autoplay:false,question:"Analise minha ficha e missão confirmadas e proponha um próximo passo válido. Apenas planejar."})}),env,ctx,{reply,personalCall,baseUrl:base(env)});
           const data=await result.json();return result.ok?{ok:true,plan:{analysis:data.analysis,next_step:data.next_step,model:data.model}}:{ok:false,error:data.error};
         }});
