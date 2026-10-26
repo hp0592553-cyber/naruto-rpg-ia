@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {playerCommands,playerRoute,forestControl} from '../player-loop.mjs';
+import {playerCommands,playerRoute,forestControl,travelArrival} from '../player-loop.mjs';
 const owner='481485837801095178',bot='1515908078913192026',channel='1520114348079583263';
 test('player catalog excludes admin and foreign applications',()=>{
  const c=playerCommands([{application_id:bot,name:'missoes',options:[{type:1,name:'ativas'}]},{application_id:bot,name:'admin'},{application_id:'123',name:'nivel'}]);
@@ -24,4 +24,10 @@ test('forest destination supports real buttons and selects, excludes disabled an
  assert.deepEqual(forestControl([{type:2,label:'Floresta e Rio · 4 min',custom_id:'real-id'}]),{control:{type:2,label:'Floresta e Rio · 4 min',custom_id:'real-id'},values:[]});
  assert.equal(forestControl([{type:2,label:'Floresta',disabled:true},{type:2,label:'Floresta',url:'https://example.test'}]),null);
  assert.deepEqual(forestControl([{type:3,options:[{label:'Floresta',value:'actual-value'}]}]).values,['actual-value']);
+});
+
+test('wait uses only an explicit game arrival timestamp',()=>{
+ assert.equal(travelArrival('Viagem iniciada\nChegada automática <t:1793030908:F> • <t:1793030908:R>'),1793030908000);
+ assert.equal(travelArrival('Central de Viagem: 4 min'),null);
+ assert.equal(travelArrival('Outro evento <t:1793030908:F>'),null);
 });
