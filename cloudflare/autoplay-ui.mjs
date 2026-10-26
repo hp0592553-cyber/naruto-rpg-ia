@@ -16,7 +16,7 @@ export const AUTOPLAY_HTML=String.raw`
  </div>
 </section>`;
 export const AUTOPLAY_JS=String.raw`
-let autoplayData=null,autoplayControlBusy=false,autoplayTickBusy=false,autoplayPollingFailed=false;
+let autoplayData=null,autoplayControlBusy=false,autoplayTickBusy=false,autoplayPollingFailed=false,autoplayShownOperation=null;
 function renderAutoplay(data){
  if(!data?.state||autoplayData?.state?.revision>data.state.revision)return;
  autoplayData=data;const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando cooldown",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
@@ -38,6 +38,7 @@ function renderAutoplay(data){
  if(s.last_result){const note=document.createElement("p");note.className="hint";note.textContent="Resultado confirmado da operação "+s.last_result.operation_id+" · "+new Date(s.last_result.at).toLocaleString("pt-BR");result.append(note);const m=s.last_result.response;
   if(m){const privateNote=document.createElement("div");privateNote.className="hint";privateNote.textContent=m.ephemeral?"🔒 Resposta privada da integração":"Resposta da integração";result.append(privateNote);if(m.content){const body=document.createElement("div");body.className="body";renderDiscordFormat(body,m,m.content);result.append(body)}const v2=renderComponentV2(result,m);gameEmbed(result,m);if(!v2){addMediaImages(result,m);gameControls(result,m)}}
  }
+ if(s.last_result?.response&&s.last_result.operation_id!==autoplayShownOperation&&!slashProgress?.pending){showCommandResponse(s.last_result.response);paintSlashProgress("Resposta da IA jogadora","Resultado recebido do Naruto Bot.");autoplayShownOperation=s.last_result.operation_id;}
  const active=["running","waiting","confirming"].includes(s.phase);
  E("autoplayStart").disabled=autoplayControlBusy||active;E("autoplayResume").disabled=autoplayControlBusy||active||!s.run_id;
  E("autoplayPause").disabled=autoplayControlBusy||["stopped","paused"].includes(s.phase);E("autoplayStop").disabled=autoplayControlBusy||s.phase==="stopped";
