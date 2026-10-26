@@ -54,7 +54,7 @@ export async function commandServiceRunner(req,env,{seal,normalize}){
  const path=new URL(req.url).pathname,now=Date.now();
  if(path==='/bridge/commands/poll'||path==='/bridge/commands/heartbeat'){
   if(data.owner_id!==String(env.BUSHIN_OWNER_DISCORD_ID)||data.ready!==true)return json({error:'Identidade ou conexão inválida'},403);
-  const beat=await read(env,HEART);if(!beat||now-beat.data.at>10000||beat.data.instance_id!==data.instance_id)await put(env,HEART,{at:now,version:Number(data.version||1),planner_revision:String(data.planner_revision||'').slice(0,40),instance_id:String(data.instance_id||''),expires_at:Number(data.expires_at)||beat?.data.expires_at||null,mode:commandServiceConfigured(env)?'host':'github_session'});
+  const beat=await read(env,HEART);if(!beat||now-beat.data.at>10000||beat.data.instance_id!==data.instance_id||(data.planner_revision&&beat.data.planner_revision!==data.planner_revision))await put(env,HEART,{at:now,version:Number(data.version||1),planner_revision:String(data.planner_revision||beat?.data.planner_revision||'').slice(0,40),instance_id:String(data.instance_id||''),expires_at:Number(data.expires_at)||beat?.data.expires_at||null,mode:commandServiceConfigured(env)?'host':'github_session'});
   if(path==='/bridge/commands/heartbeat')return json({saved:true});
   const job=await read(env,JOB);
   if(!job||job.data.phase!=='queued')return json({job:null});
