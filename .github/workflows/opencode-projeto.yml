@@ -43,12 +43,20 @@ jobs:
           ref: Projeto
           persist-credentials: false
       - uses: actions/setup-python@v5
+        id: command-python
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: scripts/naruto-panel-requirements.txt
+      - name: Reutilizar ambiente do executor
+        id: command-environment
+        uses: actions/cache@v4
+        with:
+          path: .discord2-venv
+          key: discord2-venv-${{ runner.os }}-${{ runner.arch }}-${{ steps.command-python.outputs.python-version }}-${{ hashFiles('scripts/naruto-panel-requirements.txt') }}
       - name: Instalar cliente existente
-        run: python -m pip install --disable-pip-version-check -r scripts/naruto-panel-requirements.txt
+        if: steps.command-environment.outputs.cache-hit != 'true'
+        run: |
+          python -m venv .discord2-venv
+          .discord2-venv/bin/python -m pip install --disable-pip-version-check -r scripts/naruto-panel-requirements.txt
       - name: Executar uma vez e exigir resposta correlacionada
         env:
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
@@ -56,7 +64,7 @@ jobs:
           RPG_COMMAND_JSON: ${{ inputs.command_json }}
           RPG_MODE: jogar
           RPG_ACTION_MARKER: ${{ runner.temp }}/discord2-command-reserved
-        run: python scripts/naruto_panel_command.py
+        run: .discord2-venv/bin/python scripts/naruto_panel_command.py
   jogar:
     if: github.ref == 'refs/heads/Projeto' && inputs.mode != 'comando'
     name: Verificar MCP e acesso autorizado ao Naruto Project
