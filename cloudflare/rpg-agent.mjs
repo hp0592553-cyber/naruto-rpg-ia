@@ -7,6 +7,9 @@ async function get(env,owner,key){const r=await env.DB.prepare('SELECT value_jso
 async function put(env,owner,key,value){await env.DB.prepare('INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at').bind(owner,key,JSON.stringify(value),Date.now()).run()}
 export function responseSnapshot(request,message,owner){
  if(String(request.options?.usuario||owner)!==owner||message.author_id!=='1515908078913192026')return null;
+ // A response to someone else's slash interaction is not Henrique's character.
+ const interactionUser=message.interaction_metadata?.user_id||message.interaction?.user_id;
+ if(interactionUser&&String(interactionUser)!==owner)return null;
  const fields=(message.embeds||[]).flatMap(e=>e.fields||[]),stats={};
  const names={'nível':'level','nivel':'level','xp':'xp','vida':'hp','chakra':'chakra','energia':'energy'};
  for(const f of (/^\/?(?:perfil ver|nivel)$/.test(request.command)?fields:[])){const key=names[String(f.name||'').normalize('NFKC').trim().toLowerCase()];if(!key)continue;
@@ -18,9 +21,21 @@ export function responseSnapshot(request,message,owner){
 }
 export async function recordCommandEvidence(env,owner,request,raw){
  const message=normalizeMessage({...raw,id:raw.message_id,author:{id:raw.author_id,username:'Naruto Bot',bot:true},flags:raw.flags??(raw.ephemeral?64:0)});
+ const interactionUser=message.interaction_metadata?.user_id||message.interaction?.user_id||null;
+ const foreignInteraction=!!interactionUser&&String(interactionUser)!==owner;
  const snapshot=responseSnapshot(request,message,owner);
- if(snapshot){const previous=await get(env,owner,SNAPSHOT)||{};await put(env,owner,SNAPSHOT,{...snapshot,stats:{...(previous.stats||{}),...snapshot.stats},mission:snapshot.mission||previous.mission||null})}
- const at=Date.now();await put(env,owner,'rpg-audit:'+request.request_id,{id:request.request_id,at,type:'command_response',command:request.command,message_id:message.id,channel_id:message.channel_id,ephemeral:message.ephemeral,accepted_by_game:null});
+ // A captured bot message without parsed stats/mission must not refresh the character.
+ const characterConfirmed=!!snapshot&&(Object.keys(snapshot.stats).length>0||snapshot.mission!==null);
+ if(characterConfirmed){const previous=await get(env,owner,SNAPSHOT)||{};await put(env,owner,SNAPSHOT,{...snapshot,stats:{...(previous.stats||{}),...snapshot.stats},mission:snapshot.mission||previous.mission||null})}
+ const at=Date.now();await put(env,owner,'rpg-audit:'+request.request_id,{
+  id:request.request_id,at,type:'command_response',command:request.command,
+  message_id:message.id,channel_id:message.channel_id,ephemeral:message.ephemeral,
+  response_captured:true,character_confirmed:characterConfirmed,
+  evidence_status:foreignInteraction?'foreign_interaction':characterConfirmed?'character_parsed':'response_only',
+  interaction_user_id:interactionUser,
+  // A bot response does not establish that the RPG changed state or gained XP.
+  accepted_by_game:null,game_execution_confirmed:false
+ });
  return message;
 }
 export async function agentRoute(req,env,ctx,{reply,baseUrl,plan}){
