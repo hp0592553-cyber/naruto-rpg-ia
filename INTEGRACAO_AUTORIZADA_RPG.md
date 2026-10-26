@@ -39,3 +39,5 @@ Modo Jogo não associa mais uma resposta apenas pelo nome do comando e horário:
 ## Ainda falta
 
 Integração do operador; execução do teste de perfil por essa integração; missão e combate completos; OCR de campos apenas em imagem; serviço persistente ativo; ganho de XP e nível 20 demonstrados. O ciclo jogador autônomo NÃO está concluído.
+
+O executor legado agora sai com código 2 quando captura mas não entrega a resposta. Isso não reenvia a ação e não prova progresso. Testado sem conectar ao Discord.
