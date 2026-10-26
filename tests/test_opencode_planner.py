@@ -66,9 +66,26 @@ class HeadlessPlannerTests(unittest.IsolatedAsyncioTestCase):
         def request(base,auth,path,body,timeout):
             if path=='/global/health':return {'healthy':True}
             if path=='/session':return {'id':'ses_test123'}
+            if body is None:return []
             raise TimeoutError()
         with patch.dict('os.environ',{'RPG_MODEL':'test/model'}),patch('opencode_planner.asyncio.create_subprocess_exec',side_effect=spawn),patch('opencode_planner.request_json',side_effect=request):
             result=await plan('{}')
         self.assertEqual(result['stage'],'model')
         self.assertEqual(result['error'],'opencode_timeout')
+        self.assertEqual(process.returncode,-15)
+
+    async def test_recovers_completed_text_when_server_message_never_finishes(self):
+        process=SimpleNamespace(returncode=None)
+        def terminate():process.returncode=-15
+        async def wait():return process.returncode
+        process.terminate=terminate;process.wait=wait
+        async def spawn(*args,**kwargs):return process
+        def request(base,auth,path,body,timeout):
+            if path=='/global/health':return {'healthy':True}
+            if path=='/session':return {'id':'ses_test123'}
+            if body is not None:raise TimeoutError()
+            return [{'info':{'role':'user'},'parts':[]},{'info':{'role':'assistant'},'parts':[{'type':'text','text':'{"command":"/mapa","options":{}}'}]}]
+        with patch.dict('os.environ',{'RPG_MODEL':'test/model'}),patch('opencode_planner.asyncio.create_subprocess_exec',side_effect=spawn),patch('opencode_planner.request_json',side_effect=request):
+            result=await plan('{}')
+        self.assertEqual(result['plan']['command'],'/mapa')
         self.assertEqual(process.returncode,-15)
