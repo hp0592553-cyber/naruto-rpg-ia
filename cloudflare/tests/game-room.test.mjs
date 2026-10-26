@@ -142,3 +142,14 @@ test('Mobile browser in desktop-site viewport still sees a single-panel chat and
  assert.match(PANEL_JS,/IA anterior · modelo não registrado/);
  assert.doesNotThrow(()=>new Function(PANEL_JS));
 });
+
+
+test('Natural language jogar por mim activates assisted planning rather than a fictional Discord send',()=>{
+ const marker='if(/\\b(?:joga|jogue|jogar|continua|continue)';
+ assert.match(PANEL_JS,/joga\|jogue\|jogar/);
+ assert.match(PANEL_JS,/gameRoom"\)\.open=true/);
+ assert.match(PANEL_JS,/await controlGameRoom\("plan"\)/);
+ assert.match(PANEL_JS,/não foi executada/);
+ assert.match(PANEL_JS,/joga\|jogue\|jogar\|continua\|continue/);
+ assert.doesNotThrow(()=>new Function(PANEL_JS));
+});
