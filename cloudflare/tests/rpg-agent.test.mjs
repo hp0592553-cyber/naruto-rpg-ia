@@ -30,3 +30,31 @@ test('confirmed response saves audit, private flag and only explicit evidence',a
  const f=fixture();await recordCommandEvidence(f.env,owner,{request_id:'test',command:'/missoes minhas'},{message_id:'1563974378138374218',channel_id:'1520114348079583263',author_id:'1515908078913192026',content:'Você não tem missões ativas.',embeds:[],components:[],ephemeral:true});
  assert.equal(JSON.parse(f.rows.get('discord2_character_v1')).mission.state,'none');assert.equal(JSON.parse(f.rows.get('rpg-audit:test')).ephemeral,true);assert.equal(JSON.parse(f.rows.get('rpg-audit:test')).accepted_by_game,null);
 });
+
+test('foreign interaction cannot replace Henrique character evidence',async()=>{
+ const f=fixture();
+ const foreign={message_id:'1564255220412711052',channel_id:'1520114348079583263',
+  author_id:'1515908078913192026',content:'',embeds:[{fields:[{name:'Nível',value:'20'}]}],components:[],
+  interaction_metadata:{type:2,name:'perfil ver',user_id:'697125041363615844'}};
+ await recordCommandEvidence(f.env,owner,{request_id:'foreign',command:'/perfil ver'},foreign);
+ assert.equal(f.rows.has('discord2_character_v1'),false);
+ const audit=JSON.parse(f.rows.get('rpg-audit:foreign'));
+ assert.equal(audit.evidence_status,'foreign_interaction');
+ assert.equal(audit.character_confirmed,false);
+ assert.equal(audit.game_execution_confirmed,false);
+});
+test('unparsed bot responses are captured but not a new profile confirmation',async()=>{
+ const f=fixture();
+ const base={channel_id:'1520114348079583263',author_id:'1515908078913192026',components:[],embeds:[]};
+ await recordCommandEvidence(f.env,owner,{request_id:'original',command:'/missoes minhas'},
+  {...base,message_id:'1563974378138374218',content:'Você não tem missões ativas.'});
+ const original=JSON.parse(f.rows.get('discord2_character_v1'));
+ await recordCommandEvidence(f.env,owner,{request_id:'empty',command:'/perfil ver'},
+  {...base,message_id:'1564251222687613030',content:''});
+ assert.deepEqual(JSON.parse(f.rows.get('discord2_character_v1')),original);
+ const audit=JSON.parse(f.rows.get('rpg-audit:empty'));
+ assert.equal(audit.evidence_status,'response_only');
+ assert.equal(audit.response_captured,true);
+ assert.equal(audit.character_confirmed,false);
+ assert.equal(audit.accepted_by_game,null);
+});
