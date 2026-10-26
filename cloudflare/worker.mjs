@@ -22,6 +22,7 @@ import {personalInspectCommand,personalInvokeProfileProbe} from "./personal-disc
 import {PANEL_HTML,PANEL_JS} from "./discord2-ui.mjs";
 import {agentRoute,recordCommandEvidence} from "./rpg-agent.mjs";
 import {gameRoomRoute} from "./game-room.mjs";
+import {autoplayRoute,scheduledAutoplay} from "./autoplay.mjs";
 import {normalizeMessage} from "./message-normalizer.mjs";
 import {bushinAiNext} from "./discord2-ai.mjs";
 import {codexBridgeMobile,codexBridgeAgent} from "./codex-bridge.mjs";
@@ -860,6 +861,10 @@ async function receivePrivateCommandResult(req,env){
 }
 
 export default {
+  async scheduled(_event,env,ctx){
+    if(env.BUSHIN_AUTOPLAY_CRON!=="enabled")return;
+    ctx.waitUntil(scheduledAutoplay(env).catch(()=>{console.error("autoplay_scheduled_failed")}));
+  },
   async fetch(req,env){
     const path=new URL(req.url).pathname;
     try{
@@ -914,6 +919,7 @@ export default {
         }
         if(path==="/mobile/discord2/api/search/mine"&&req.method==="POST")return await searchHenriqueMessages(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/ai/scan"&&req.method==="POST")return await scanRpgChannels(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
+        if(path==="/mobile/discord2/api/autoplay")return autoplayRoute(req,env,ctx,{reply,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/game-room")return gameRoomRoute(req,env,ctx,{reply,baseUrl:base(env),plan:async channel_id=>{
           const result=await bushinAiNext(new Request(base(env)+"/mobile/discord2/api/ai/next",{
            method:"POST",headers:{origin:base(env),"content-type":"application/json"},
