@@ -12,8 +12,15 @@ function harness(){
  const end=PANEL_JS.indexOf('composer.addEventListener(',start);
  vm.runInContext(PANEL_JS.slice(start,end)+
   ';presentCommands=()=>{};this.h={load:loadCommands,reset:resetCommandCatalog,state:()=>({loaded:catalogLoaded,channel:catalogChannel,commands:commandCatalog})}',context);
- return {context,h:context.h,calls};
+ return {context,h:context.h,calls,box,composer};
 }
+test('prefetch is silent and typing slash reuses the in-flight catalog',async()=>{
+ const {h,calls,box,composer}=harness();composer.value='hello';
+ const loading=h.load(false,true);assert.equal(box.hidden,true);
+ composer.value='/';await h.load();assert.equal(calls.length,1);
+ calls[0].resolve({catalog_verified:true,channel_id:'1520114348079583263',commands:[{name:'perfil'}]});
+ await loading;await h.load();assert.equal(calls.length,1);assert.equal(h.state().loaded,true);
+});
 test('channel changes discard delayed catalogs and request the selected channel',async()=>{
  const {context,h,calls}=harness();
  const first=h.load();await h.load();assert.equal(calls.length,1);context.S.current='1532489544161562857';h.reset();const second=h.load();
