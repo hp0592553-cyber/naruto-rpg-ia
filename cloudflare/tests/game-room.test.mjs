@@ -130,3 +130,15 @@ test('HTML has live game mode controls, evidence and official Discord handoff',(
  assert.match(PANEL_JS,/execution_state|Executado no jogo/);
  assert.doesNotThrow(()=>new Function(PANEL_JS));
 });
+
+
+test('Mobile browser in desktop-site viewport still sees a single-panel chat and visible game controls',()=>{
+ assert.match(PANEL_HTML,/@media \(max-width:1200px\)/);
+ assert.match(PANEL_HTML,/\.root\{display:block;width:100%;height:100dvh/);
+ assert.match(PANEL_HTML,/\.side\{position:fixed;z-index:30/);
+ assert.match(PANEL_HTML,/\.ai\{position:fixed;z-index:31/);
+ assert.match(PANEL_HTML,/#menu,#showAi,#closeAi\{display:inline-block\}/);
+ assert.match(PANEL_JS,/if\(codexChatMode&&!wasChatMode\)E\("gameRoom"\)\.open=true/);
+ assert.match(PANEL_JS,/IA anterior · modelo não registrado/);
+ assert.doesNotThrow(()=>new Function(PANEL_JS));
+});
