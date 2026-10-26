@@ -26,7 +26,7 @@ permissions:
 
 concurrency:
   group: naruto-rpg-${{ inputs.mode == 'servico' && 'service' || 'opencode' }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ inputs.mode == 'servico' }}
 
 jobs:
   servico:

@@ -8,10 +8,11 @@ async function put(env,key,data){await env.DB.prepare('INSERT INTO bushin_projec
 async function cas(env,old,next){const r=old?await env.DB.prepare('UPDATE bushin_project_state SET value_json=?,updated_at=? WHERE owner_id=? AND key=? AND value_json=?').bind(JSON.stringify(next),Date.now(),env.BUSHIN_OWNER_DISCORD_ID,JOB,old.raw).run():await env.DB.prepare('INSERT OR IGNORE INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?)').bind(env.BUSHIN_OWNER_DISCORD_ID,JOB,JSON.stringify(next),Date.now()).run();return Number(r.meta?.changes)===1}
 export const commandServiceConfigured=env=>typeof env.BUSHIN_EXECUTOR_TOKEN==='string'&&env.BUSHIN_EXECUTOR_TOKEN.length>=43;
 export async function commandServiceSelected(env){return commandServiceConfigured(env)||(await read(env,HEART))?.data.mode==='github_session'}
-export async function commandServiceHealth(env){const beat=await read(env,HEART);return {online:!!beat&&Date.now()-beat.data.at<30000}}
+export async function commandServiceHealth(env){const beat=await read(env,HEART);return {online:!!beat&&Date.now()-beat.data.at<30000&&Number(beat.data.version||0)>=2}}
 export async function startCommandSession(req,env,ctx,baseUrl){
  if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||ctx.me?.id!==String(env.BUSHIN_OWNER_DISCORD_ID)||ctx.me?.membership?.member!==true)return json({error:'Origem ou conta inválida'},403);
- const beat=await read(env,HEART);if(beat&&Date.now()-beat.data.at<30000)return json({state:'connected',note:'Cliente já conectado.'});
+ const beat=await read(env,HEART);if(beat&&Date.now()-beat.data.at<30000&&Number(beat.data.version||0)>=2)return json({state:'connected',note:'Cliente já conectado.'});
+ const pending=await read(env,JOB);if(pending&&['queued','claimed'].includes(pending.data.phase))return json({error:'Existe uma ação pendente. Confira antes de renovar a sessão.'},409);
  const t=Date.now();const lock=await env.DB.prepare('INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at WHERE bushin_project_state.updated_at < ?').bind(env.BUSHIN_OWNER_DISCORD_ID,'discord2_session_dispatch',JSON.stringify({at:t}),t,t-120000).run();
  if(Number(lock.meta?.changes)!==1)return json({state:'queued',note:'Sessão já solicitada. Aguarde o início do GitHub.'});
  try{const r=await fetch('https://api.github.com/repos/hp0592553-cyber/naruto-rpg-ia/actions/workflows/opencode-projeto.yml/dispatches',{method:'POST',redirect:'manual',signal:AbortSignal.timeout(12000),headers:{Authorization:'Bearer '+env.BUSHIN_GITHUB_TOKEN,'Content-Type':'application/json',Accept:'application/vnd.github+json','User-Agent':'Bushin-Session'},body:JSON.stringify({ref:'Projeto',inputs:{mode:'servico'}})});return json(r.ok?{state:'queued',note:'Sessão de teste solicitada. Dura até 25 minutos após conectar; ainda não está online.'}:{error:'GitHub não iniciou a sessão (HTTP '+r.status+').'},r.ok?200:503)}catch{return json({error:'Solicitação incerta. Confira no GitHub antes de repetir.'},503)}
@@ -35,7 +36,7 @@ export async function commandServiceRunner(req,env,{seal,normalize}){
  const path=new URL(req.url).pathname,now=Date.now();
  if(path==='/bridge/commands/poll'){
   if(data.owner_id!==String(env.BUSHIN_OWNER_DISCORD_ID)||data.ready!==true)return json({error:'Identidade ou conexão inválida'},403);
-  const beat=await read(env,HEART);if(!beat||now-beat.data.at>10000)await put(env,HEART,{at:now,mode:commandServiceConfigured(env)?'host':'github_session'});
+  const beat=await read(env,HEART);if(!beat||now-beat.data.at>10000)await put(env,HEART,{at:now,version:Number(data.version||1),mode:commandServiceConfigured(env)?'host':'github_session'});
   const job=await read(env,JOB);
   if(!job||job.data.phase!=='queued')return json({job:null});
   if(now-job.data.at>120000){await cas(env,job,{...job.data,phase:'expired'});return json({job:null})}

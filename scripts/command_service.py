@@ -140,7 +140,7 @@ async def main():
         deadline = asyncio.get_running_loop().time() + (25*60 if github else 365*24*3600)
         while executor.client.is_ready() and asyncio.get_running_loop().time() < deadline:
             try:
-                result = await asyncio.to_thread(request, 'poll', {'owner_id': str(executor.client.user.id), 'ready': True})
+                result = await asyncio.to_thread(request, 'poll', {'owner_id': str(executor.client.user.id), 'ready': True, 'version': 2})
             except RuntimeError:
                 await asyncio.sleep(5)
                 continue
