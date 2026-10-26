@@ -77,6 +77,15 @@ export async function commandServiceMobile(req,env,ctx,{unseal,baseUrl}){
  if(data.action!=='start'||!validServiceCommand(data.command_request))return json({error:'Comando inválido'},400);
  const heartbeat=await read(env,HEART);if(!heartbeat||Date.now()-heartbeat.data.at>30000)return json({error:'Executor permanente offline. Nenhum comando enviado.'},503);
  if(job&&['queued','claimed'].includes(job.phase))return json({error:'Há uma ação pendente; consulte antes de repetir.'},409);
+ if(data.command_request.command==='/component'){
+  const input=data.command_request.options;
+  if(!job?.confirmed||!job.sealed)return json({error:'Não há caixa própria confirmada nesta sessão.'},409);
+  const previous=(await unseal(job.sealed,env)).response;
+  const control=(previous.controls||[]).find(c=>c.custom_id===input.custom_id&&!c.disabled&&!c.url&&[2,3].includes(c.type));
+  let values;try{values=JSON.parse(input.values||'[]')}catch{return json({error:'Seleção inválida'},400)}
+  if(previous.message_id!==input.message_id||previous.channel_id!==data.command_request.channel_id||!control||!Array.isArray(values)||values.length>25||new Set(values).size!==values.length)return json({error:'Esta caixa está desatualizada ou não pertence à sua última resposta.'},409);
+  if(control.type===2&&values.length||control.type===3&&(values.length<(control.min_values??1)||values.length>(control.max_values??1)||values.some(v=>!control.options?.some(o=>o.value===v))))return json({error:'Opção não oferecida pelo jogo.'},400);
+ }
  const next={phase:'queued',at:Date.now(),request_id:crypto.randomUUID(),request:data.command_request};
  if(!await cas(env,row,next))return json({error:'Outra ação foi reservada'},409);
  return json({state:'queued',submitted:true,executed:false,confirmed:false,command:next.request.command,request_id:next.request_id,transport:'persistent_service'});

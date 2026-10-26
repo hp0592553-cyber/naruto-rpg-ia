@@ -98,7 +98,12 @@ async def execute_job(executor, job, state_dir):
     executor.state.pop('interaction_id', None)
     try:
         connected = await executor.status()
-        outcome = await executor.consult(data['command'], data['options']) if connected.get('status') == 'connected' else connected
+        if connected.get('status') != 'connected':
+            outcome = connected
+        elif data['command'] == '/component':
+            outcome = await executor.component_action(data['options'])
+        else:
+            outcome = await executor.consult(data['command'], data['options'])
     except Exception:
         outcome = {'command_completed': False}
     result = {'request_id': request_id}

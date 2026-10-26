@@ -52,6 +52,7 @@ class RestrictedClient(discord.Client):
 
 
 client = RestrictedClient(enable_debug_events=True)
+last_game_message = None
 connection = None
 channel = None
 commands = []
@@ -213,6 +214,7 @@ def prepare_options(command, options):
 
 
 async def consult(command_path="missoes minhas", options=None):
+    global last_game_message
     options = options or {}
     if state['command_attempted']:
         return {**state, 'status': 'blocked_already_attempted'}
@@ -266,9 +268,77 @@ async def consult(command_path="missoes minhas", options=None):
                 if not any(response.get(key) for key in ('content', 'embeds', 'components', 'attachments')):
                     continue
                 state.update(command_completed=True, response=response)
+                last_game_message = msg
                 # Conteudo capturado e verificavel; nao inferir XP/nivel automaticamente.
                 return {**state, 'status': 'response_received', 'rpg_state_verified': False}
         return {**state, 'status': 'submitted_response_not_correlated'}
+    finally:
+        client.receiver = None
+
+
+def find_game_component(nodes, custom_id, depth=0):
+    if depth > 8:
+        return None
+    for node in nodes[:40]:
+        if node.get('custom_id') == custom_id and node.get('type') in (2, 3) and not node.get('disabled') and not node.get('url'):
+            return node
+        children = list(node.get('components') or [])
+        for key in ('accessory', 'component'):
+            if isinstance(node.get(key), dict):
+                children.append(node[key])
+        found = find_game_component(children, custom_id, depth + 1)
+        if found:
+            return found
+    return None
+
+
+async def component_action(options):
+    global last_game_message
+    from discord.components import Button, SelectMenu
+    message = last_game_message
+    if message is None or str(message.id) != options.get('message_id') or message.channel.id != CHANNEL_ID or message.author.id != NARUTO_BOT_ID:
+        return {'command_completed': False, 'status': 'component_message_not_available'}
+    before = message_data(message)
+    raw = find_game_component(before['components'], options.get('custom_id'))
+    values = json.loads(options.get('values', '[]'))
+    if raw is None or not isinstance(values, list) or any(not isinstance(x, str) for x in values):
+        return {'command_completed': False, 'status': 'component_invalid'}
+    target = Button(raw, message) if raw['type'] == 2 else SelectMenu(raw, message)
+    if raw['type'] == 3:
+        selected = [o for o in target.options if o.value in values]
+        if len(selected) != len(set(values)) or not target.min_values <= len(selected) <= target.max_values:
+            return {'command_completed': False, 'status': 'component_values_invalid'}
+    elif values:
+        return {'command_completed': False, 'status': 'component_values_invalid'}
+    marker = Path(os.environ['RPG_ACTION_MARKER'])
+    try:
+        with marker.open('x') as handle:
+            handle.write('component reserved\n')
+    except FileExistsError:
+        return {'command_completed': False, 'status': 'blocked_run_already_attempted'}
+    received = asyncio.Queue()
+    async def receive(msg):
+        if msg.channel.id == CHANNEL_ID and msg.author.id == NARUTO_BOT_ID:
+            await received.put(msg)
+    client.receiver = receive
+    try:
+        interaction = await asyncio.wait_for(target.click() if raw['type'] == 2 else target.choose(*selected), 45)
+        deadline = asyncio.get_running_loop().time() + 35
+        while asyncio.get_running_loop().time() < deadline:
+            try:
+                msg = await asyncio.wait_for(received.get(), deadline - asyncio.get_running_loop().time())
+            except asyncio.TimeoutError:
+                break
+            if getattr(msg.flags, 'loading', False):
+                continue
+            current = message_data(msg)
+            metadata = getattr(msg, 'interaction', None) or getattr(msg, 'interaction_metadata', None)
+            changed = msg.id == message.id and any(current[k] != before[k] for k in ('content', 'components', 'embeds', 'attachments'))
+            correlated = getattr(metadata, 'id', None) == getattr(interaction, 'id', None) and getattr(interaction, 'id', None) is not None
+            if (changed or correlated) and any(current[k] for k in ('content', 'components', 'embeds', 'attachments')):
+                last_game_message = msg
+                return {'command_completed': True, 'response': current, 'status': 'response_received'}
+        return {'command_completed': False, 'status': 'component_response_uncertain'}
     finally:
         client.receiver = None
 

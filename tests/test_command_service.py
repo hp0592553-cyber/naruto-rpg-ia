@@ -1,4 +1,5 @@
 import asyncio
+import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -11,6 +12,16 @@ service=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(service)
 
 class ServiceTests(unittest.TestCase):
+    def test_components_v2_traversal_rejects_disabled_and_link_controls(self):
+        source=ast.parse((Path(__file__).resolve().parents[1]/'scripts/naruto_guarded_mcp.py').read_text())
+        nodes=[n for n in source.body if isinstance(n,ast.FunctionDef) and n.name=='find_game_component']
+        env={};exec(compile(ast.Module(body=nodes,type_ignores=[]),'<components>','exec'),env)
+        active={'type':3,'custom_id':'destination','options':[{'label':'Floresta','value':'forest'}]}
+        nodes=[{'type':17,'components':[{'type':1,'components':[active,{'type':2,'custom_id':'disabled','disabled':True},{'type':2,'custom_id':'link','url':'https://example.test'}]}]}]
+        find=env['find_game_component']
+        self.assertIs(find(nodes,'destination'),active)
+        self.assertIsNone(find(nodes,'disabled'));self.assertIsNone(find(nodes,'link'));self.assertIsNone(find(nodes,'unknown'))
+
     def test_result_is_private_and_survives_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'pending-result.json'

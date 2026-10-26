@@ -25,6 +25,8 @@ test('concurrent claims execute once; results must match author and channel; rep
  assert.equal((await send(response)).status,200);assert.equal((await send(response)).status,200);
  const result=await (await commandServiceMobile(new Request('https://example.test/api'),env,ctx,helpers)).json();
  assert.equal(result.confirmed,true);assert.equal(result.response.message_id,response.message_id);
+ const stale={command:'/component',channel_id:channel,options:{message_id:'1564274391158751295',custom_id:'missing',values:'[]'}};
+ assert.equal((await commandServiceMobile(req('/api',{action:'start',command_request:stale}),env,ctx,helpers)).status,409);
 });
 test('stopping a queued job prevents claiming it',async()=>{
  const {env}=fixture();await poll(env);
