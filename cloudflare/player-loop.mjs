@@ -7,6 +7,7 @@ const kinds=/^\/(perfil ver|nivel|mapa|missoes (minhas|ativas|diarias)|viajar|ac
 // Catalog traversal uses a slash joined directly to the root.
 export function playerCommands(catalog){const walk=(n,p)=>{const path=p?n.name?p+' '+n.name:p:'/'+n.name;const sub=(n.options||[]).filter(x=>[1,2].includes(x.type));return sub.length?sub.flatMap(x=>walk(x,path)):kinds.test(path)?[{command:path,description:n.description||'',options:n.options||[]}]:[]};return (catalog||[]).filter(x=>String(x.application_id)==='1515908078913192026').flatMap(x=>walk(x,''))}
 export function forestControl(controls){const key=s=>String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase();for(const c of controls||[]){if(c.disabled||c.url)continue;if(c.type===2&&key(c.label).includes('floresta'))return {control:c,values:[]};if(c.type===3){const option=c.options?.find(o=>key(o.label).includes('floresta'));if(option)return {control:c,values:[option.value]};}}return null;}
+export function travelArrival(text){if(!/Viagem iniciada|Chegada automática/i.test(text||''))return null;const stamp=String(text).match(/<t:(\d{10}):[FRf]> /)||String(text).match(/<t:(\d{10}):[FRf]>/);return stamp?Number(stamp[1])*1000:null;}
 export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal}){
  const owner=String(ctx.me?.id||'');const HEAD={'cache-control':'no-store'};
  if(owner!==String(env.BUSHIN_OWNER_DISCORD_ID)||ctx.me?.membership?.member!==true)return reply({error:'Conta não autorizada'},403,HEAD);
@@ -50,6 +51,8 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal}){
    const next=await commit(d=>{d.steps++;d.completed_keys.push(pending.action.command);d.player_observations=(d.player_observations||[]).concat([{command:pending.action.command,channel_id:result.response.channel_id,text:result.response.normalized_text||result.response.content||'',controls:result.response.controls||[]}]).slice(-8);d.last_result={operation_id:pending.id,at:Date.now(),response:result.response};d.pending=null;d.phase='running';d.reason='Resposta recebida. Escolhendo a próxima ação.';d.next_tick_at=Date.now()+1500;recordAutoplay(d,'confirmed',pending.action.command)});return reply(view(next.state),200,HEAD);
   }
   if(!(await commandServiceHealth(env)).online){const next=await commit(d=>{d.phase='waiting';d.reason='Executor desconectado. Nenhum comando enviado.';d.next_tick_at=Date.now()+5000});return reply(view(next.state),200,HEAD)}
+  const arrival=travelArrival(saved.state.last_result?.response?.normalized_text);
+  if(arrival&&Date.now()<arrival+5000){const next=await commit(d=>{d.phase='waiting';d.reason='Viagem confirmada. Aguardando a chegada informada pelo jogo.';d.next_tick_at=arrival+5000});return reply(view(next.state),200,HEAD)}
   if(saved.state.steps>=12)throw Error('Limite de ações desta sessão atingido.');
   const registry=await personalInspectCommand(env,{channel_id:CHANNEL,command:'/perfil ver'},ctx);
   if(!registry.catalog_verified||registry.stale)throw Error('Catálogo de comandos não confirmado.');
@@ -58,7 +61,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal}){
   const controls=(last?.controls||[]).filter(c=>!c.disabled&&!c.url&&[2,3].includes(c.type));
   if(controls.length)available.push({command:'/component',description:'Usar somente uma das caixas da última resposta própria',options:[{name:'message_id',type:3,required:true},{name:'custom_id',type:3,required:true},{name:'values',type:3,required:true}]});
   const seed=['/perfil ver','/missoes minhas','/missoes ativas'].find(x=>!saved.state.completed_keys.includes(x)&&available.some(c=>c.command===x));
-  let selected=seed?{command:seed,options:{},channel_id:CHANNEL}:null;
+  let selected=arrival&&Date.now()>=arrival+5000&&!saved.state.completed_keys.includes('/mapa')&&available.some(c=>c.command==='/mapa')?{command:'/mapa',options:{},channel_id:CHANNEL}:seed?{command:seed,options:{},channel_id:CHANNEL}:null;
   let channels=[{id:CHANNEL,name:'Comandos'}];
   if(!selected){
    const listed=await personalListChannels(env,ctx);if(listed.listed&&Array.isArray(listed.channels))channels=listed.channels.filter(x=>[0,5].includes(Number(x.type))).map(x=>({id:String(x.id),name:x.name}));
