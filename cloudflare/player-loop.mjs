@@ -12,6 +12,32 @@ export function playerCommands(catalog){const walk=(n,p)=>{const path=p?n.name?p
 export function forestControl(controls){const key=s=>String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase();for(const c of controls||[]){if(c.disabled||c.url)continue;if(c.type===2&&key(c.label).includes('floresta'))return {control:c,values:[]};if(c.type===3){const option=c.options?.find(o=>key(o.label).includes('floresta'));if(option)return {control:c,values:[option.value]};}}return null;}
 export function ownComponentOptions(options,last){const result={...options};const controls=(last?.controls||[]).filter(c=>!c.disabled&&!c.url&&[2,3].includes(c.type));if(!result.custom_id&&controls.length===1)result.custom_id=controls[0].custom_id;const target=controls.find(c=>c.custom_id===result.custom_id);if(!target)throw Error('A IA não escolheu uma opção da última caixa.');if(result.message_id&&result.message_id!==last.message_id)throw Error('Caixa desatualizada.');result.message_id=last.message_id;if(!Object.hasOwn(result,'values')&&target.type===2)result.values='[]';return result;}
 export function travelArrival(text){if(!/Viagem iniciada|Chegada automática/i.test(text||''))return null;const stamp=String(text).match(/<t:(\d{10}):[FRf]> /)||String(text).match(/<t:(\d{10}):[FRf]>/);return stamp?Number(stamp[1])*1000:null;}
+const ruleOrder=['/missoes minhas','/missoes ativas','/perfil ver','/nivel','/missoes diarias','/viajar','/acao coletar','/interagir npc','/mapa'];
+export function rulePlan({available=[],observations=[],uncertain=[],contextChannel=CHANNEL,channels=[],gate=null,refused=false}){
+ const key=s=>String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+ const text=observations.map(x=>key(x.text)).join(' ');
+ const seen=(command,channel)=>observations.some(x=>x.command===command&&(x.channel_id||CHANNEL)===channel);
+ const unsafe=(command,channel)=>uncertain.some(x=>x.command===command&&(x.channel_id||CHANNEL)===channel);
+ const usable=command=>available.find(x=>x.command===command)&&!available.find(x=>x.command===command).options?.some(o=>o.required);
+ const channelFor=command=>command==='/viajar'&&gate?gate.id:contextChannel;
+ const hints=[];
+ if(/viaj|floresta|rio|portao|konoha/.test(text))hints.push('/viajar','/mapa');
+ if(/colet|buscar|procurar|encontrar/.test(text))hints.push('/acao coletar');
+ if(/npc|falar|convers|interagir|ajudar/.test(text))hints.push('/interagir npc');
+ for(const command of [...hints,...ruleOrder]){
+  if(!usable(command))continue;
+  const channel=channelFor(command);
+  if(!channels.some(c=>c.id===channel)||seen(command,channel)||unsafe(command,channel))continue;
+  if(command==='/viajar'&&refused&&observations.some(x=>x.command==='/viajar'&&x.channel_id===channel))continue;
+  return {command,channel_id:channel,options:{},reason:'Regra local: '+command+' ainda não conferido neste canal.'};
+ }
+ const usableCommands=ruleOrder.filter(command=>usable(command));
+ if(usableCommands.length){
+  const fresh=channels.filter(c=>c.id!==contextChannel&&[0,5].includes(Number(c.type))).find(c=>usableCommands.some(command=>!seen(command,c.id)&&!unsafe(command,c.id)));
+  if(fresh)return {command:'/navigate',channel_id:fresh.id,options:{},reason:'Regra local: ler outro canal acessível antes de repetir uma ação.'};
+ }
+ return null;
+}
 export function confirmPlayerResult(state,pending,result,owner){
  const response=result.response,interactionOwner=response?.interaction_metadata?.user_id||response?.interaction?.user_id;
  if(result.request_id!==pending.id||result.command!==pending.action.command||result.state!=='finished'||!result.confirmed||!response||response.channel_id!==pending.action.channel_id||response.author_id!=='1515908078913192026'||interactionOwner&&interactionOwner!==owner)throw Error('Resposta sem correlação de pedido, canal, bot e conta. Nenhuma repetição será feita.');
@@ -33,7 +59,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
  const credentialConfigured=typeof env.DISCORD_USER_TOKEN==='string'&&env.DISCORD_USER_TOKEN.trim().length>=35;
  const health=await commandServiceHealth(env);
  const integration={configured:credentialConfigured,mode:'personal_user_token',credential_configured:credentialConfigured,identity_verified:false,executor_online:health.online,brain_ready:health.brain_ready,personal_account_automation:true,official_game_authorization:false,code:credentialConfigured?null:'personal_session_not_configured',missing:credentialConfigured?[]:['DISCORD_USER_TOKEN: credencial da conta pessoal no Worker']};
- const view=state=>({state,controller:'personal_player',integration,note:'Conexão pessoal solicitada pelo proprietário. Credencial configurada não comprova identidade, executor online ou jogada. Cada envio exige sua própria confirmação de resultado.'});
+ const view=state=>{const local=state?.brain?.provider==='local-rules';return {state,controller:'personal_player',integration,planner:{mode:local?'local-rules':'auto',model:state?.brain?.model||null,error:state?.brain?.error||null,local,retry_at:state?.planner_retry_at||null},note:'Conexão pessoal solicitada pelo proprietário. Credencial configurada não comprova identidade, executor online ou jogada. Cada envio exige sua própria confirmação de resultado.'}};
  if(req.method==='GET')return reply(view((await readAutoplay(env,owner)).state),200,HEAD);
  if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||!req.headers.get('content-type')?.startsWith('application/json'))return reply({error:'Origem inválida'},403,HEAD);
  let data;try{const text=await req.text();if(text.length>1500)throw Error();data=JSON.parse(text)}catch{return reply({error:'Pedido inválido'},400,HEAD)}
@@ -44,7 +70,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
  const service=async body=>{const r=await commandServiceMobile(request('opencode',body),env,ctx,{unseal,baseUrl});const v=await r.json();if(!r.ok)throw Error(v.error||'Executor indisponível');return v};
  const lookup=async id=>(await commandServiceMobile(new Request(baseUrl+'/mobile/discord2/api/ai/opencode'+(id?'?request_id='+encodeURIComponent(id):'')),env,ctx,{unseal,baseUrl})).json();
  if(action==='stop'||action==='pause'){
-   const next=await update(d=>{d.phase=action==='pause'?'paused':'stopped';d.code=null;d.reason=(action==='pause'?'Pausado.':'Parado.')+' Uma ação já recebida pelo jogo pode terminar.';d.run_id=null;d.lease=null;return d});
+   const next=await update(d=>{d.phase=action==='pause'?'paused':'stopped';d.code=null;d.reason=(action==='pause'?'Pausado.':'Parado.')+' Uma ação já recebida pelo jogo pode terminar.';d.run_id=null;d.lease=null;d.plan_pending=null;return d});
   try{await service({action:'stop'})}catch{}
   return reply(view(next.state),200,HEAD);
  }
@@ -93,9 +119,15 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
  try{
   if(saved.state.plan_pending){
    const result=await lookup(saved.state.plan_pending);
-   if(['queued','in_progress'].includes(result.state)){const next=await commit(d=>{d.reason='OpenCode está decidindo a próxima ação.';d.next_tick_at=Date.now()+2000});return reply(view(next.state),200,HEAD)}
-   if(!result.brain?.plan)throw Error('OpenCode não retornou um plano: '+(result.brain?.error||result.state));
-   const next=await commit(d=>{d.plan_decision=result.brain.plan;d.plan_pending=null;d.brain={provider:'opencode',model:result.brain.model};d.reason='Plano recebido do OpenCode. Conferindo comandos e contexto.';d.next_tick_at=Date.now()+1000});return reply(view(next.state),200,HEAD);
+    if(['queued','in_progress'].includes(result.state)){const next=await commit(d=>{d.reason='OpenCode está decidindo a próxima ação.';d.next_tick_at=Date.now()+2000});return reply(view(next.state),200,HEAD)}
+    if(!result.brain?.plan){
+     const error=String(result.brain?.error||result.note||result.state||'planner_unavailable').slice(0,120);
+     if(!result.brain?.error&&!['finished','stopped','uncertain','unknown','expired'].includes(result.state))throw Error('OpenCode não retornou um plano: '+error);
+     // The model provider is unavailable (quota/timeout). Keep playing with verified catalog rules only.
+     const next=await commit(d=>{d.plan_pending=null;d.plan_decision=null;d.brain={provider:'local-rules',model:'catalog-v1',error};d.planner_retry_at=Date.now()+600000;d.reason='IA (OpenCode) indisponível: '+error+'. Continuo com regras locais usando somente comandos verificados.';d.next_tick_at=Date.now()+500;return d});
+     return reply(view(next.state),200,HEAD);
+    }
+    const next=await commit(d=>{d.plan_decision=result.brain.plan;d.plan_pending=null;d.brain={provider:'opencode',model:result.brain.model};d.planner_retry_at=0;d.reason='Plano recebido do OpenCode. Conferindo comandos e contexto.';d.next_tick_at=Date.now()+1000});return reply(view(next.state),200,HEAD);
   }
   if(saved.state.pending){
    const result=await lookup(saved.state.pending.id);
@@ -134,7 +166,13 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
    throw Error(history.reason||'Não foi possível ler o contexto atual do chat.');
   }
   const conversation=chatContext(history.messages);
+  const plannerOffline=saved.state.brain?.provider==='local-rules'&&Date.now()<(saved.state.planner_retry_at||0);
   const target=replyTarget(history.messages,owner,saved.state.chat_started_at||Date.now(),saved.state.reserved_reply_ids||[]);
+  if(target&&plannerOffline){
+   // Chat replies need the model. Skip once (never send invented text) and keep using verified commands.
+   const next=await commit(d=>{d.reserved_reply_ids=(d.reserved_reply_ids||[]).concat(target.id).slice(-100);d.reason='IA sem cota: mensagem de chat não respondida. Jogo segue com regras locais verificadas.';d.next_tick_at=Date.now()+1000;return d});
+   return reply(view(next.state),200,HEAD);
+  }
   if(target){
    if(saved.state.plan_decision?.command!=='/reply'){
     const planningContext=JSON.stringify({task:'Responder de forma curta e casual em português, sem inventar fatos ou prometer ações.',conversation,target:{id:target.id,author_id:target.author_id,text:target.normalized_text||target.content},commands:[{command:'/reply',options:[{name:'text',type:3,required:true}]}],channels:[{id:contextChannel}]});
@@ -184,14 +222,25 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
    else if(menu){selected={command:'/component',channel_id:last.channel_id,options:{message_id:last.message_id,custom_id:menu.control.custom_id,values:JSON.stringify(menu.values)}};}
    else if(npc)selected={command:'/component',channel_id:last.channel_id,options:{message_id:last.message_id,custom_id:npc.custom_id,values:'[]'}};
    else{
+    const local=()=>rulePlan({available,observations:context,uncertain:saved.state.uncertain_actions||[],contextChannel,channels,gate,refused});
     if(saved.state.plan_decision)selected=saved.state.plan_decision;
+    else if(plannerOffline){
+     selected=local();
+     if(!selected)throw Error('IA sem cota e nenhuma nova ação verificável neste canal. Nada foi enviado; pause ou aguarde a cota do modelo.');
+    }
     else{
      const planningContext=JSON.stringify({learned_rules:learned.evidence,conversation,context_channel_id:contextChannel,observations:context,commands:available,channels,last_response:last?{message_id:last.message_id,channel_id:last.channel_id,controls}:null});
      if(planningContext.length>50000)throw Error('Contexto grande demais para o OpenCode.');
-     const queued=await service({action:'start',run_id:run,command_request:{command:'/agent-plan',channel_id:contextChannel,options:{context:planningContext}}});
+     let queued;
+     try{queued=await service({action:'start',run_id:run,command_request:{command:'/agent-plan',channel_id:contextChannel,options:{context:planningContext}}})}
+     catch(e){
+      // The model/service failed before queueing. Switch to verified local rules instead of stopping.
+      const next=await commit(d=>{d.brain={provider:'local-rules',model:'catalog-v1',error:'planner_request_failed'};d.planner_retry_at=Date.now()+600000;d.reason='Plano indisponível ('+String(e.message).slice(0,80)+'). Sigo com regras locais verificadas.';d.next_tick_at=Date.now()+500;return d});
+      return reply(view(next.state),200,HEAD);
+     }
      const next=await commit(d=>{d.plan_pending=queued.request_id;d.phase='waiting';d.reason='Enviando contexto ao OpenCode.';d.next_tick_at=Date.now()+2000});return reply(view(next.state),200,HEAD);
     }
-    if(!selected.command)throw Error(String(selected.reason||'Não encontrei uma próxima ação verificável.').slice(0,300));
+    if(!selected?.command)throw Error(String(selected?.reason||'Não encontrei uma próxima ação verificável.').slice(0,300));
    }
   }
   if(!available.some(x=>x.command===selected.command))throw Error('Ação fora do catálogo permitido.');
