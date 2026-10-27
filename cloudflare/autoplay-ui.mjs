@@ -102,7 +102,9 @@ function renderAutoplay(data){
  autoplayData=data;updateCollectionStatus();autoplayRenderLogs();updateAutoplayCountdown();const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
   const missing=(data.integration?.missing||[]).join("; ");
   E("autoplayStatus").textContent=data.integration?.configured===false?"Execução bloqueada: "+(missing||s.reason||"adaptador autorizado indisponível"):(s.phase==="stopped"?"Parado.":(labels[s.phase]||s.phase)+" · "+(s.reason||""));
-  if(data.planner?.local&&!/Discord ou executor indisponível|Discord temporarily unavailable|temporariamente indisponível/i.test(s.reason||""))E("autoplayStatus").textContent+=" · piloto local por regras (nenhum plano de IA confirmado)";
+  if(data.planner?.mode==="opencode-pending")E("autoplayStatus").textContent+=" · OpenCode preparando plano (nenhuma ação confirmada ainda)";
+  else if(data.planner?.mode==="opencode")E("autoplayStatus").textContent+=" · IA OpenCode (plano recebido)";
+  else if(data.planner?.local&&!/Discord ou executor indisponível|Discord temporarily unavailable|temporariamente indisponível/i.test(s.reason||""))E("autoplayStatus").textContent+=" · piloto local por regras (nenhum plano de IA confirmado)";
   else if(data.planner?.ai)E("autoplayStatus").textContent+=" · motor Llama no Worker (fallback da IA)";
   if(s.phase==="blocked"||s.phase==="uncertain"||s.phase==="failed"||s.code==="discord_rate_limited")E("autoplayEvidence").open=true;
  const snapshot=s.snapshot,stats=snapshot?.stats||{},scalar=k=>stats[k]===null||stats[k]===undefined?"não confirmado":String(stats[k]),resource=k=>stats[k]?stats[k].current+" / "+stats[k].max:"não confirmado";
