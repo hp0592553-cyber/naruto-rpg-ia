@@ -55,9 +55,13 @@ export function expectedActionChannel(command,{channels=[],current=null,gate=nul
  if(command==='/navigate')return null;
  if(command==='/component')return current;
  if(command==='/viajar'&&gate&&list.some(c=>c.id===gate.id))return gate.id;
+ if(command==='/mapa'){
+  const scene=list.find(c=>c.id===current);
+  return scene&&channelKind(scene)==='scene'?scene.id:null;
+ }
  if(command==='/interagir npc'||command==='/acao coletar'){
   const scene=list.find(c=>c.id===current);
-  return scene&&channelKind(scene)==='scene'?scene.id:commands?.id||null;
+  return scene&&channelKind(scene)==='scene'?scene.id:null;
  }
  return commands?.id||null;
 }
