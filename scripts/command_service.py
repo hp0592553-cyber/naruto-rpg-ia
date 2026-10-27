@@ -164,6 +164,23 @@ async def main():
     try:
         connected = await executor.status()
         if connected.get('status') != 'connected':
+            # Only record categorical diagnostics: never expose token, user IDs,
+            # exception text or HTTP response bodies in public Actions logs.
+            allowed_statuses = {
+                'blocked_missing_user_token', 'discord_login_failed',
+                'discord_disconnected', 'discord_not_ready', 'wrong_identity_bot',
+                'wrong_account', 'guild_not_accessible',
+                'channel_not_accessible', 'wrong_guild',
+            }
+            failure = connected.get('status')
+            diagnostic = {'status': failure if failure in allowed_statuses else 'unknown'}
+            error_type = connected.get('error_type')
+            if isinstance(error_type, str) and error_type.isidentifier() and len(error_type) <= 64:
+                diagnostic['error_type'] = error_type
+            http_status = connected.get('http_status')
+            if isinstance(http_status, int) and not isinstance(http_status, bool) and 100 <= http_status <= 599:
+                diagnostic['http_status'] = http_status
+            print('Discord connection diagnostic: ' + json.dumps(diagnostic), flush=True)
             raise SystemExit('Discord connection unavailable; nothing sent')
         print('Command service connected', flush=True)
         deadline = asyncio.get_running_loop().time() + (60 if github else 365*24*3600)
