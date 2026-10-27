@@ -147,6 +147,12 @@ async function send(){
  js=replaceSection(js,'async function sendSelectedSlash(){','E("send").onclick=sendSelectedSlash;',part=>{
   part=replaceOnce(part,'async function submitConnectedCommand(command,options){','const commandChannel=S.current,commandDraft=composer.value;\nasync function submitConnectedCommand(command,options){');
   part=replaceOnce(part,'channel_id:S.current,options','channel_id:commandChannel,options');
+  // The GitHub command service is intentionally short-lived. Do not leave the
+  // Android composer waiting a full minute for a vanished runner.
+  part=replaceOnce(part,'for(let i=0;i<12;i++){','for(let i=0;i<2;i++){');
+  part=replaceOnce(part,'O executor ainda não conectou. O comando não foi enviado; tente novamente quando a sessão estiver online.',
+    'Executor temporário offline ou sessão expirada (60 s). Nenhum comando foi enviado. Use o Discord oficial para executar o slash; não envie /comandos como texto.');
+
   part=replaceOnce(part,'const raw=composer.value.trim();if(!raw.startsWith("/"))return originalSend();','const raw=composer.value.trim();if(!raw.startsWith("/"))return originalSend();\n if(typeof mobileFiles==="function"&&mobileFiles().length){status("Imagens são enviadas como mensagem; retire os anexos antes de executar um comando /.",true);return;}');
   part=replaceOnce(part,'composer.value="";commandPicked=null;status("");startSlashProgress(command);','if(S.current===commandChannel&&composer.value===commandDraft){composer.value="";commandPicked=null;}status("");startSlashProgress(command,Date.now(),result.request_id,commandChannel);');
   return part;
