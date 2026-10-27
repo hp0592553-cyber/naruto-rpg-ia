@@ -900,7 +900,6 @@ async function receivePrivateCommandResult(req,env){
    if(!check.ok)return fail(503);
    return reply({saved:false,probe:true,stage:"ready",storage_verified:true},200,{"cache-control":"no-store"});
   }
-  if(diagnostic)return fail(403);
   if(!/^[a-f0-9-]{36}$/.test(data.request_id||""))return fail(400);
   stage="request_correlation";
   const owner=String(env.BUSHIN_OWNER_DISCORD_ID),stateRow=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?").bind(owner,"bushin_opencode_runner_v1").first();
