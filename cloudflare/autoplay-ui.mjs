@@ -92,7 +92,7 @@ function renderAutoplay(data){
  autoplayData=data;updateCollectionStatus();autoplayRenderLogs();const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
   const missing=(data.integration?.missing||[]).join("; ");
   E("autoplayStatus").textContent=data.integration?.configured===false?"Execução bloqueada: "+(missing||s.reason||"adaptador autorizado indisponível"):(s.phase==="stopped"?"Parado.":(labels[s.phase]||s.phase)+" · "+(s.reason||""));
-  if(data.planner?.local)E("autoplayStatus").textContent+=" · piloto local por regras (IA sem cota)";
+  if(data.planner?.local&&!/Discord ou executor indisponível|Discord temporarily unavailable|temporariamente indisponível/i.test(s.reason||""))E("autoplayStatus").textContent+=" · piloto local por regras (nenhum plano de IA confirmado)";
   else if(data.planner?.ai)E("autoplayStatus").textContent+=" · motor Llama no Worker (fallback da IA)";
   if(s.phase==="blocked"||s.phase==="uncertain"||s.phase==="failed")E("autoplayEvidence").open=true;
  const snapshot=s.snapshot,stats=snapshot?.stats||{},scalar=k=>stats[k]===null||stats[k]===undefined?"não confirmado":String(stats[k]),resource=k=>stats[k]?stats[k].current+" / "+stats[k].max:"não confirmado";
@@ -106,7 +106,7 @@ function renderAutoplay(data){
  const yes=v=>v===true?"sim":v===false?"não":"incerto / aguardando";
  E("autoplayStages").textContent=st?"Solicitada: "+yes(st.requested)+" · Tentativa de envio: "+yes(st.send_attempted)+" · Recebida pela integração: "+yes(st.sent)+" · Executada pelo jogo: "+yes(st.executed)+" · Resposta capturada: "+yes(st.response_captured)+" · Estado confirmado: "+yes(st.game_state_confirmed)+" · XP/nível aumentou: "+yes(st.progress_confirmed):"Nenhuma ação enviada nesta sessão do agente.";
  E("autoplayPersistence").textContent=data.note+" Uma ação já recebida pelo jogo pode terminar após Pausar ou Parar; ela será conferida pelo mesmo ID.";
-  E("autoplayIntegration").textContent=data.integration?.mode==="personal_user_token"?"Conexão pessoal/self-bot · credencial: "+(data.integration.credential_configured?"configurada, identidade conferida por operação":"ausente")+" · executor: "+(data.integration.executor_online?"online":"offline")+" · planejador: "+(data.planner?.local?"regras locais (modelo indisponível)":data.planner?.ai?"Llama no Worker (fallback)":data.integration.brain_ready?"OpenCode online":"indisponível")+". Não é uma integração oficial do jogo.":data.integration?.configured?"Adaptador configurado. Autorização e ações válidas serão verificadas com o jogo antes de cada envio.":(data.integration?.missing||[]).join("\n");
+  E("autoplayIntegration").textContent=data.integration?.mode==="personal_user_token"?"Conexão pessoal/self-bot · credencial: "+(data.integration.credential_configured?"configurada, identidade conferida por operação":"ausente")+" · executor: "+(data.integration.executor_online?"online":"offline")+" · planejador: "+(data.planner?.local?"regras locais (sem plano confirmado)":data.planner?.ai?"Llama no Worker (fallback)":data.integration.brain_ready?"OpenCode online":"indisponível")+". Não é uma integração oficial do jogo.":data.integration?.configured?"Adaptador configurado. Autorização e ações válidas serão verificadas com o jogo antes de cada envio.":(data.integration?.missing||[]).join("\n");
  E("autoplayMissing").open=s.phase==="blocked";
  if(document.activeElement!==E("autoplayGoal")&&!E("autoplayGoal").value)E("autoplayGoal").value=s.goal||"";
  const history=E("autoplayHistory");history.replaceChildren();
@@ -120,8 +120,8 @@ function renderAutoplay(data){
  if(s.phase==="blocked"&&/não confirmou o resultado|não há caixa própria confirmada/i.test(s.reason||"")){E("gameToolbox").hidden=true;E("autoplayStatus").textContent="Pausado · A última interação não teve resposta confirmada. Nenhum clique será repetido.";}
  if(s.last_chat_reply&&s.last_chat_reply.id!==autoplayShownReply){const sent=s.last_chat_reply;autoplayShownReply=sent.id;if(S.current===sent.channel_id&&!S.messages.some(m=>m.id===sent.id)){S.messages.push({id:sent.id,channel_id:sent.channel_id,author_id:s.owner_id,author_name:"Henrique",content:sent.text,timestamp:new Date().toISOString()});render("keep");}}
  const active=["running","waiting","confirming"].includes(s.phase);
- if(active&&s.site_action?.type==="channel"&&s.site_action.id!==autoplaySiteAction&&S.channels.some(c=>c.id===s.site_action.channel_id)){autoplaySiteAction=s.site_action.id;if(S.current!==s.site_action.channel_id)select(s.site_action.channel_id).catch(e=>status("Não foi possível abrir o canal: "+e.message,true));}
- if(active&&s.site_action?.type==="channel"&&s.site_action.id!==autoplaySiteAction&&!S.channels.some(c=>c.id===s.site_action.channel_id))refreshAutoplayChannels(s.site_action);
+ if(false&&active&&s.site_action?.type==="channel"&&s.site_action.id!==autoplaySiteAction&&S.channels.some(c=>c.id===s.site_action.channel_id)){autoplaySiteAction=s.site_action.id;if(S.current!==s.site_action.channel_id)select(s.site_action.channel_id).catch(e=>status("Não foi possível abrir o canal: "+e.message,true));}
+ if(false&&active&&s.site_action?.type==="channel"&&s.site_action.id!==autoplaySiteAction&&!S.channels.some(c=>c.id===s.site_action.channel_id))refreshAutoplayChannels(s.site_action);
 
  E("autoplayInstruct").disabled=autoplayControlBusy||autoplayStopBusy;
  E("autoplayStart").disabled=autoplayControlBusy||autoplayStopBusy||active;E("autoplayResume").disabled=autoplayControlBusy||autoplayStopBusy||active||!s.run_id;
