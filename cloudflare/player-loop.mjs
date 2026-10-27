@@ -15,7 +15,7 @@ export function forestControl(controls){const key=s=>String(s||'').normalize('NF
 export function ownComponentOptions(options,last){const result={...options};const controls=(last?.controls||[]).filter(c=>!c.disabled&&!c.url&&[2,3].includes(c.type));if(!result.custom_id&&controls.length===1)result.custom_id=controls[0].custom_id;const target=controls.find(c=>c.custom_id===result.custom_id);if(!target)throw Error('A IA não escolheu uma opção da última caixa.');if(result.message_id&&result.message_id!==last.message_id)throw Error('Caixa desatualizada.');result.message_id=last.message_id;if(!Object.hasOwn(result,'values')&&target.type===2)result.values='[]';return result;}
 export function travelArrival(text){if(!/Viagem iniciada|Chegada automática/i.test(text||''))return null;const stamp=String(text).match(/<t:(\d{10}):[FRf]> /)||String(text).match(/<t:(\d{10}):[FRf]>/);return stamp?Number(stamp[1])*1000:null;}
 const ruleOrder=['/missoes minhas','/missoes ativas','/perfil ver','/nivel','/missoes diarias','/viajar','/acao coletar','/interagir npc','/mapa'];
-export function rulePlan({available=[],observations=[],uncertain=[],contextChannel=CHANNEL,channels=[],gate=null,refused=false}){
+export function rulePlan({available=[],observations=[],uncertain=[],contextChannel=CHANNEL,channels=[],gate=null,refused=false,visitedChannels=[]}){
  const list=readableChannels(channels),key=channelText;
  const text=observations.map(x=>key(x.text)).join(' ');
  const seen=(command,channel)=>observations.some(x=>x.command===command&&(x.channel_id||CHANNEL)===channel);
@@ -34,7 +34,7 @@ export function rulePlan({available=[],observations=[],uncertain=[],contextChann
   return {command,channel_id:channel,options:{},reason:'Regra local: '+command+' no canal apropriado, ainda não conferido.',provider:'local-rules',model:'catalog-v2'};
  }
  // Never wander into rules, announcements or social channels to try RPG commands.
- const scene=list.find(c=>c.id!==contextChannel&&channelKind(c)==='scene');
+ const scene=list.find(c=>c.id!==contextChannel&&channelKind(c)==='scene'&&!visitedChannels.includes(c.id));
  if(scene&&available.some(c=>c.command==='/navigate')&&!observations.some(x=>x.command==='/navigate'&&x.channel_id===scene.id)){
   return {command:'/navigate',channel_id:scene.id,options:{},reason:'Ler cenário acessível sem executar comando nem supor que o personagem viajou.',provider:'local-rules',model:'catalog-v2'};
  }
@@ -309,12 +309,13 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   if(controls.length)available.push({command:'/component',description:'Usar somente uma das caixas da última resposta própria',options:[{name:'message_id',type:3,required:true},{name:'custom_id',type:3,required:true},{name:'values',type:3,required:true}]});
   const seed=!saved.state.refresh_observation&&['/perfil ver','/nivel','/missoes minhas','/missoes ativas'].find(x=>!saved.state.completed_keys.includes(x)&&available.some(c=>c.command===x));
   let selected=seed?{command:seed,options:{},channel_id:CHANNEL,provider:'rules-seed',model:'catalog-v1'}:null;
-  let channels=[{id:CHANNEL,name:'Comandos'}],workersAiError=null;
+  let channels=[{id:CHANNEL,name:'Comandos',type:0}],workersAiError=null;
   if(!selected){
-   const listed=await listChannels(env,ctx);if(listed.listed&&Array.isArray(listed.channels))channels=listed.channels.filter(x=>[0,5].includes(Number(x.type))).map(x=>({id:String(x.id),name:x.name}));else throw Error(listed.reason||'Não foi possível conferir os canais disponíveis.');
+   const listed=await listChannels(env,ctx);if(listed.listed&&Array.isArray(listed.channels))channels=readableChannels(listed.channels);else throw Error(listed.reason||'Não foi possível conferir os canais disponíveis.');
    const context=(saved.state.player_observations||[]).map(x=>({...x,text:x.text.slice(0,2200)}));
    const key=s=>String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
    const gate=channels.find(c=>key(c.name).includes('portao')&&key(c.name).includes('konoha'));
+   const recommended=choosePlayerChannel({channels,selectedId:contextChannel,previousId:saved.state.channel_check?.channel_id,location:saved.state.snapshot?.location});
    const refused=context.some(x=>x.command==='/viajar'&&/viagem indisponível|canais permitidos/i.test(x.text));
    const menu=forestControl(controls);
    const npc=controls.length===1&&controls[0].type===2&&String(controls[0].custom_id).startsWith('interagir:')?controls[0]:null;
@@ -325,23 +326,24 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
     if(!destination)throw Error('Nenhum canal permitido para consultar o mapa após a chegada.');
     selected={command:'/mapa',options:{},channel_id:destination.id,refresh_read:true,arrival_check:arrival};
    }
+   else if(recommended.location_confirmed&&recommended.channel_id!==contextChannel)selected={command:'/navigate',options:{},channel_id:recommended.channel_id,provider:'verified-location',reason:recommended.reason};
    else if(gate&&(saved.state.refresh_menu||refused&&!context.some(x=>x.command==='/viajar'&&x.channel_id===gate.id)))selected={command:'/viajar',options:{},channel_id:gate.id};
    else if(menu){selected={command:'/component',channel_id:last.channel_id,options:{message_id:last.message_id,custom_id:menu.control.custom_id,values:JSON.stringify(menu.values)}};}
    else if(npc)selected={command:'/component',channel_id:last.channel_id,options:{message_id:last.message_id,custom_id:npc.custom_id,values:'[]'}};
    else{
-    const local=()=>rulePlan({available,observations:context,uncertain:saved.state.uncertain_actions||[],contextChannel,channels,gate,refused});
+    const local=()=>rulePlan({available,observations:context,uncertain:saved.state.uncertain_actions||[],contextChannel,channels,gate,refused,visitedChannels:saved.state.visited_channels||[]});
     if(saved.state.plan_decision)selected=saved.state.plan_decision;
     else if(plannerOffline){
      let aiError=null;
      if(env.BUSHIN_AI?.run&&Date.now()>=(saved.state.workers_ai_retry_at||0)){
-      const outcome=await workersAiPlan(env,{available,observations:context,channels,contextChannel,last,goal:saved.state.goal});
+      const outcome=await workersAiPlan(env,{available,observations:context,channels,contextChannel,last,goal:saved.state.goal,location:saved.state.snapshot?.location});
       if(outcome.plan)selected=outcome.plan;else aiError=outcome.error||'no_action';
      }
      if(!selected){selected=local();workersAiError=aiError}
      if(!selected){const next=await commit(d=>{d.phase='waiting';d.code=null;d.brain={provider:'local-rules',model:'catalog-v1',error:aiError||'no_verified_action'};d.workers_ai_error=aiError||'no_verified_action';d.workers_ai_retry_at=Date.now()+120000;d.reason='Sem nova ação de RPG verificável neste canal. Continuo acompanhando novas mensagens, sem enviar comandos repetidos.';d.next_tick_at=Date.now()+30000;return d});return reply(view(next.state),200,HEAD);}
     }
     else{
-     const planningContext=JSON.stringify({learned_rules:learned.evidence,conversation,context_channel_id:contextChannel,observations:context,commands:available,channels,last_response:last?{message_id:last.message_id,channel_id:last.channel_id,controls}:null});
+     const planningContext=JSON.stringify({learned_rules:learned.evidence,conversation,context_channel_id:contextChannel,observations:context,commands:available,channels:planningChannels(channels,contextChannel,saved.state.snapshot?.location),last_response:last?{message_id:last.message_id,channel_id:last.channel_id,controls}:null});
      if(planningContext.length>50000)throw Error('Contexto grande demais para o OpenCode.');
      let queued;
      try{queued=await service({action:'start',run_id:run,command_request:{command:'/agent-plan',channel_id:contextChannel,options:{context:planningContext}}})}
@@ -359,8 +361,11 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   if(selected.options===null||selected.options===''||Array.isArray(selected.options)&&selected.options.length===0)selected.options={};
   if(selected.options&& (typeof selected.options!=='object'||Array.isArray(selected.options)))throw Error('A IA retornou parâmetros inválidos para '+selected.command);
   selected.channel_id=selected.channel_id||CHANNEL;
+  if(selected.command!=='/navigate'&&selected.command!=='/component'&&!selected.refresh_read){const gateForAction=channels.find(c=>channelText(c.name).includes('portao')&&channelText(c.name).includes('konoha'));const expected=expectedActionChannel(selected.command,{channels,current:contextChannel,gate:gateForAction});if(expected!==selected.channel_id)throw Error('O comando foi escolhido para outro canal. Nenhum envio em canal sem confirmação.');}
   if(selected.command==='/component'){selected.channel_id=last.channel_id;selected.options=ownComponentOptions(selected.options||{},last);const key=JSON.stringify([last.message_id,selected.options.custom_id,selected.options.values]);if((saved.state.completed_components||[]).includes(key))throw Error('Esta opção já foi usada nesta mensagem.');selected.component_key=key;}
   if(!channels.some(c=>c.id===selected.channel_id))throw Error('A IA não escolheu um canal acessível.');
+  if(selected.command==='/navigate'&&channelKind(channels.find(c=>c.id===selected.channel_id))!=='scene')throw Error('Navegação recusada: não é um canal de cenário do RPG.');
+  if(selected.command==='/navigate'&&selected.provider!=='verified-location'&&(saved.state.visited_channels||[]).includes(selected.channel_id))throw Error('Canal de cenário já inspecionado nesta sessão.');
   if(!selected.refresh_read&&(saved.state.uncertain_actions||[]).some(x=>x.command===selected.command&&x.channel_id===selected.channel_id))throw Error('Uma tentativa dessa ação ficou incerta nesse canal. Nenhum reenvio foi feito.');
   if(selected.command!=='/component'&&!selected.refresh_read&&!(saved.state.refresh_menu&&selected.command==='/viajar')&&(saved.state.player_observations||[]).some(x=>x.command===selected.command&&(x.channel_id||CHANNEL)===selected.channel_id))throw Error('Esta ação já foi conferida nesse canal; não vou repeti-la.');
   const definition=available.find(x=>x.command===selected.command);
@@ -372,7 +377,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   const current=(await readAutoplay(env,owner)).state;if(current.run_id!==run||current.lease?.id!==lock||current.phase==='stopped')return reply(view(current),200,HEAD);
   if(selected.command==='/navigate'){
    if(selected.channel_id===contextChannel)throw Error('Este canal já está selecionado.');
-   const next=await commit(d=>{d.plan_decision=null;d.context_channel_id=selected.channel_id;d.site_action={id:crypto.randomUUID(),type:'channel',channel_id:selected.channel_id};d.steps++;d.reason='Canal selecionado. Lendo o contexto antes da próxima ação.';d.next_tick_at=Date.now()+1500;recordAutoplay(d,'channel_selected',selected.channel_id)});return reply(view(next.state),200,HEAD);
+   const next=await commit(d=>{d.plan_decision=null;d.context_channel_id=selected.channel_id;d.site_action={id:crypto.randomUUID(),type:'channel',channel_id:selected.channel_id};d.steps++;d.visited_channels=[...new Set([...(d.visited_channels||[]),selected.channel_id])].slice(-100);d.channel_check={channel_id:selected.channel_id,channel_name:channels.find(c=>c.id===selected.channel_id)?.name||'',source:selected.provider||'scene',checked_at:Date.now(),read_verified:false,location_confirmed:selected.provider==='verified-location',reason:selected.reason||'Canal acessível; leitura será verificada na próxima etapa.'};d.reason='Canal de cenário selecionado para leitura, sem enviar comandos. A localização precisa de confirmação pelo jogo.';d.next_tick_at=Date.now()+1500;recordAutoplay(d,'channel_selected',selected.channel_id)});return reply(view(next.state),200,HEAD);
   }
   const result=await service({action:'start',run_id:run,command_request:{command:selected.command,channel_id:selected.channel_id,options:selected.options||{}}});
   const next=await commit(d=>{d.plan_decision=null;d.context_channel_id=selected.channel_id;d.site_action={id:result.request_id,type:'channel',channel_id:selected.channel_id};d.refresh_menu=false;d.refresh_observation=false;if(selected.provider==='workers-ai'){d.brain={provider:'workers-ai',model:selected.model};d.workers_ai_error=null;d.workers_ai_retry_at=0}else if(selected.provider==='local-rules'){d.brain={provider:'local-rules',model:selected.model};if(workersAiError){d.workers_ai_error=workersAiError;d.workers_ai_retry_at=Date.now()+120000}}if(selected.component_key)d.completed_components=(d.completed_components||[]).concat(selected.component_key).slice(-100);d.pending={id:result.request_id,action:{label:selected.command,command:selected.command,channel_id:selected.channel_id,...(selected.arrival_check?{arrival_check:selected.arrival_check}:{})},stages:{requested:true,sent:false}};d.phase='confirming';d.reason='Executando '+selected.command;d.next_tick_at=Date.now()+2000;recordAutoplay(d,'requested',selected.command)});if(!next.changed){try{await service({action:'stop'})}catch{}}return reply(view(next.state),200,HEAD);
