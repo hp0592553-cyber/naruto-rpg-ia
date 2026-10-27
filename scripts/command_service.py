@@ -166,7 +166,7 @@ async def main():
         if connected.get('status') != 'connected':
             raise SystemExit('Discord connection unavailable; nothing sent')
         print('Command service connected', flush=True)
-        deadline = asyncio.get_running_loop().time() + (25*60 if github else 365*24*3600)
+        deadline = asyncio.get_running_loop().time() + (5*60 if github else 365*24*3600)
         presence = asyncio.create_task(heartbeat(executor, deadline))
         if pending.exists():
             await deliver(pending)
