@@ -12,7 +12,7 @@ def report(status,details):
     REPORT.write_text("# Bushin · reparo de IA em ambiente temporário\n\n**Estado:** "+status+"\n\n"+details+"\n",encoding="utf-8")
     print(status+": "+details[:300])
 def run(argv, timeout=180):
-    return subprocess.run(argv,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=timeout)
+    return subprocess.run(argv,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=timeout,env={k:v for k,v in os.environ.items() if k not in ('GH_MODELS_TOKEN','GITHUB_TOKEN')})
 def read_logs():
     sections=[]
     for p in SOURCE_LOGS:
@@ -48,7 +48,7 @@ def preview_patch(data):
     if run(["git","apply",str(PATCH)]).returncode:return "Rejeitado: aplicação local falhou."
     try:
         syntax=run(["bash","-e","-c",'for file in cloudflare/*.mjs; do node --check "$file"; done'],timeout=60)
-        tests=run(["node","--test","cloudflare/tests"],timeout=170)
+        tests=run(["node","--test",*[str(p) for p in sorted(Path("cloudflare/tests").glob("*.test.mjs"))]],timeout=170)
         (OUT/"ai-repair-test.log").write_text((syntax.stdout+tests.stdout)[-35000:],encoding="utf-8")
         passed=syntax.returncode==0 and tests.returncode==0
     except Exception as e:
