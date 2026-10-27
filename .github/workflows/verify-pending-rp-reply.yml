@@ -1,0 +1,23 @@
+name: Bushin Pending and RP Reply Fix
+on:
+  push:
+    branches: [fix/bushin-pending-rp-reply-20261027]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check module syntax
+        run: |
+          node --check cloudflare/player-loop.mjs
+          node --check cloudflare/player-context.mjs
+          node --check cloudflare/autoplay-ui.mjs
+      - name: Run focused tests
+        run: timeout 120s node --test cloudflare/tests/player-pending-rp.test.mjs cloudflare/tests/history-ai-draft.test.mjs cloudflare/tests/player-channel.test.mjs
