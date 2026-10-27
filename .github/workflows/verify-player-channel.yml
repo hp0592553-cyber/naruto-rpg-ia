@@ -1,0 +1,30 @@
+name: Bushin RPG Channel Verification
+on:
+  push:
+    branches:
+      - fix/bushin-verificar-canal-rpg-20261026
+    paths:
+      - .github/workflows/verify-player-channel.yml
+      - cloudflare/player-channel.mjs
+      - cloudflare/player-loop.mjs
+      - cloudflare/autoplay-ui.mjs
+      - cloudflare/tests/player-channel.test.mjs
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Check module syntax
+        run: |
+          node --check cloudflare/player-channel.mjs
+          node --check cloudflare/player-loop.mjs
+          node --check cloudflare/autoplay-ui.mjs
+      - name: Run focused RPG channel tests
+        run: timeout 110s node --test cloudflare/tests/player-channel.test.mjs
