@@ -166,7 +166,21 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
  const health=await commandServiceHealth(env);
  const integration={configured:credentialConfigured,mode:'personal_user_token',credential_configured:credentialConfigured,identity_verified:false,executor_online:health.online,brain_ready:health.brain_ready,personal_account_automation:true,official_game_authorization:false,code:credentialConfigured?null:'personal_session_not_configured',missing:credentialConfigured?[]:['DISCORD_USER_TOKEN: credencial da conta pessoal no Worker']};
  const view=state=>{const local=state?.brain?.provider==='local-rules',ai=state?.brain?.provider==='workers-ai',opencode=state?.brain?.provider==='opencode',planning=!!state?.plan_pending;return {state,controller:'personal_player',integration,planner:{mode:planning?'opencode-pending':opencode?'opencode':local?'local-rules':ai?'workers-ai':'auto',model:state?.brain?.model||null,error:state?.brain?.error||null,local:!planning&&local,ai:!planning&&ai,opencode,planning,retry_at:state?.planner_retry_at||null,ai_error:state?.workers_ai_error||null},note:'Conexão pessoal solicitada pelo proprietário. Credencial configurada não comprova identidade, executor online ou jogada. Cada envio exige sua própria confirmação de resultado.'}};
- if(req.method==='GET')return reply(view((await readAutoplay(env,owner)).state),200,HEAD);
+ if(req.method==='GET'){
+  const state=(await readAutoplay(env,owner)).state;
+  let planner_job=null;
+  if(state.plan_pending){
+   try{
+    const endpoint=baseUrl+'/mobile/discord2/api/ai/opencode?request_id='+encodeURIComponent(state.plan_pending);
+    const result=await commandServiceMobile(new Request(endpoint),env,ctx,{unseal,baseUrl});
+    if(result.ok){
+     const job=await result.json();
+     planner_job={state:job.state,has_plan:!!job.brain?.plan,error:job.brain?.error||null};
+    }else planner_job={state:'unavailable'};
+   }catch{planner_job={state:'unavailable'};}
+  }
+  return reply({...view(state),planner_job},200,HEAD);
+ }
  if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||!req.headers.get('content-type')?.startsWith('application/json'))return reply({error:'Origem inválida'},403,HEAD);
  let data;try{const text=await req.text();if(text.length>1500)throw Error();data=JSON.parse(text)}catch{return reply({error:'Pedido inválido'},400,HEAD)}
  const saved=await readAutoplay(env,owner);if(data.revision!==saved.state.revision&&!['stop','pause'].includes(data.action))return reply({error:'Estado mudou. Atualize antes de continuar.'},409,HEAD);
@@ -275,6 +289,13 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   if(saved.state.plan_pending){
    const result=await lookup(saved.state.plan_pending);
     if(['queued','in_progress'].includes(result.state)){const next=await commit(d=>{d.reason='OpenCode está decidindo a próxima ação.';d.next_tick_at=Date.now()+2000});return reply(view(next.state),200,HEAD)}
+    // Decisions made before a long browser/background suspension must be
+    // replanned against current game observations, not executed blindly.
+    const queuedAt=(saved.state.history||[]).slice().reverse().find(e=>e.type==='planner_queued')?.at||0;
+    if(result.state==='finished'&&result.brain?.plan&&queuedAt&&Date.now()-queuedAt>600000){
+     const next=await commit(d=>{d.plan_pending=null;d.plan_decision=null;d.plan_stale=false;d.reason='Plano antigo do OpenCode descartado após a interrupção. Conferindo o jogo antes de decidir novamente.';d.next_tick_at=Date.now()+1200;recordAutoplay(d,'plan_discarded','Plano ficou mais de dez minutos sem conferência; nenhuma ação enviada.');return d});
+     return reply(view(next.state),200,HEAD);
+    }
     if(saved.state.plan_stale){
      const next=await commit(d=>{d.plan_pending=null;d.plan_decision=null;d.plan_stale=false;d.reason='Novo pedido recebido: plano anterior descartado. Solicitando novo plano.';d.next_tick_at=Date.now()+500;recordAutoplay(d,'plan_discarded','Plano anterior ao pedido atual; nenhum comando enviado.');return d});
      return reply(view(next.state),200,HEAD);
