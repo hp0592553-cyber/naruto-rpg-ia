@@ -6,6 +6,7 @@ export const AUTOPLAY_HTML=String.raw`
   <button type="button" id="autoplayStop">⏹ Parar</button>
  </div>
  <p id="autoplayStatus" class="hint" role="status" aria-live="polite">Conferindo o jogador…</p>
+ <p id="autoplayCooldown" class="hint" role="status" aria-live="polite"></p>
  <div id="autoplayCollectNotice" class="hint" aria-live="off" hidden></div>
   <details class="playerEvidence" id="autoplayEvidence">
    <summary>Estado, resultados e bloqueios</summary>
@@ -60,6 +61,15 @@ function autoplayRenderLogs(){
 }
 E("autoplayCopyLogs").onclick=async()=>{try{await navigator.clipboard.writeText(E("autoplayLogText").textContent);status("Logs copiados.",false)}catch(e){status("Não foi possível copiar os logs.",true)}};
 E("autoplayClearLogs").onclick=()=>{autoplayClientErrors=[];try{sessionStorage.removeItem(autoplayLogKey)}catch{}autoplayRenderLogs()};
+function updateAutoplayCountdown(){
+ const host=E("autoplayCooldown"),s=autoplayData?.state;
+ if(!host)return;
+ const limited=s?.code==="discord_rate_limited"||/HTTP 429|Discord em pausa por 429|Discord em espera OAuth/i.test(String(s?.reason||""));
+ if(!limited||!Number.isFinite(Number(s?.next_tick_at))||s.next_tick_at<=Date.now()){host.textContent="";return;}
+ const seconds=Math.max(1,Math.ceil((s.next_tick_at-Date.now())/1000));
+ host.textContent="⏳ Discord limitou consultas (429). Aguardando "+seconds+" segundos para a próxima leitura. Não repita o botão.";
+ autoplayTransientRetryAt=Math.max(autoplayTransientRetryAt,Number(s.next_tick_at));
+}
 function updateCollectionStatus(){
  const host=E("autoplayCollectNotice"),box=autoplayData?.state?.last_result?.response;
  if(!host||!box||String(box.channel_id||"")!==String(S.current||"")||!/coleta:\s*como funciona/i.test(String(box.normalized_text||box.content||""))){if(host)host.hidden=true;return;}
@@ -89,12 +99,12 @@ async function refreshAutoplayChannels(action){
 }
 function renderAutoplay(data){
  if(!data?.state||autoplayData?.state?.revision>data.state.revision)return;
- autoplayData=data;updateCollectionStatus();autoplayRenderLogs();const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
+ autoplayData=data;updateCollectionStatus();autoplayRenderLogs();updateAutoplayCountdown();const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
   const missing=(data.integration?.missing||[]).join("; ");
   E("autoplayStatus").textContent=data.integration?.configured===false?"Execução bloqueada: "+(missing||s.reason||"adaptador autorizado indisponível"):(s.phase==="stopped"?"Parado.":(labels[s.phase]||s.phase)+" · "+(s.reason||""));
   if(data.planner?.local&&!/Discord ou executor indisponível|Discord temporarily unavailable|temporariamente indisponível/i.test(s.reason||""))E("autoplayStatus").textContent+=" · piloto local por regras (nenhum plano de IA confirmado)";
   else if(data.planner?.ai)E("autoplayStatus").textContent+=" · motor Llama no Worker (fallback da IA)";
-  if(s.phase==="blocked"||s.phase==="uncertain"||s.phase==="failed")E("autoplayEvidence").open=true;
+  if(s.phase==="blocked"||s.phase==="uncertain"||s.phase==="failed"||s.code==="discord_rate_limited")E("autoplayEvidence").open=true;
  const snapshot=s.snapshot,stats=snapshot?.stats||{},scalar=k=>stats[k]===null||stats[k]===undefined?"não confirmado":String(stats[k]),resource=k=>stats[k]?stats[k].current+" / "+stats[k].max:"não confirmado";
  const channel=s.channel_check,activeName=S.channels.find(c=>c.id===s.context_channel_id)?.name||(channel?.channel_id===s.context_channel_id?channel.channel_name:null)||s.context_channel_id||'desconhecido';
  E("autoplayChannelStatus").textContent=channel?.read_verified?
@@ -127,7 +137,7 @@ function renderAutoplay(data){
  E("autoplayStart").disabled=autoplayControlBusy||autoplayStopBusy||active;E("autoplayResume").disabled=autoplayControlBusy||autoplayStopBusy||active||!s.run_id;
  E("autoplayPause").disabled=autoplayControlBusy||["stopped","paused"].includes(s.phase);E("autoplayStop").disabled=autoplayStopBusy||(s.phase==="stopped"&&!autoplayControlBusy);
  E("autoplayReview").disabled=autoplayControlBusy||!s.pending;
- E("autoplayChannelCheck").disabled=autoplayControlBusy||autoplayStopBusy||!!s.lease?.until&&s.lease.until>Date.now();
+ E("autoplayChannelCheck").disabled=autoplayControlBusy||autoplayStopBusy||!!s.lease?.until&&s.lease.until>Date.now()||Date.now()<autoplayTransientRetryAt;
 }
 async function refreshAutoplay(){
  try{const data=await req("/autoplay");renderAutoplay(data);return data;}
@@ -144,6 +154,7 @@ async function controlAutoplay(action,goal){
   finally{autoplayStopBusy=false;if(autoplayData)renderAutoplay(autoplayData);if(stopError)E("autoplayStatus").textContent=stopError;}
  }
  if(autoplayControlBusy||autoplayStopBusy)return null;
+ if(action==="check_channel"&&autoplayData?.state?.lease?.until>Date.now()){E("autoplayStatus").textContent="Conferência aguardará a operação atual. Nenhuma mensagem repetida.";return null}
  if(["start","resume","check_channel"].includes(action)&&Date.now()<autoplayTransientRetryAt){const left=Math.ceil((autoplayTransientRetryAt-Date.now())/1000);E("autoplayStatus").textContent="Discord em espera: "+left+" segundos restantes. Nenhum comando repetido.";return null}
  autoplayControlBusy=true;let failedNotice=null,requestedRevision=null;
  if(autoplayData)renderAutoplay(autoplayData);
@@ -197,6 +208,7 @@ E("autoplayChannelCheck").onclick=async()=>{await controlAutoplay("check_channel
 E("autoplayRefresh").onclick=async()=>{autoplayPollingFailed=false;await refreshAutoplay()};
 setInterval(autoplayTick,1000);
 setInterval(updateCollectionStatus,1000);
+setInterval(updateAutoplayCountdown,1000);
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")refreshAutoplay()});
 refreshAutoplay();
 `;
