@@ -39,6 +39,17 @@ export function rulePlan({available=[],observations=[],uncertain=[],contextChann
  }
  return null;
 }
+export async function workersAiChatReply(env,{conversation=[],target={}}){
+ if(!env.BUSHIN_AI||typeof env.BUSHIN_AI.run!=='function')return null;
+ const system='Você responde a mensagens no chat de Naruto RPG como Henrique. Responda em UMA frase curta e casual em português (máximo 150 caracteres). Não invente ações, comandos /, XP ou ficha. Responda SOMENTE JSON: {"text":"sua resposta"}.';
+ const prompt=JSON.stringify({conversation:conversation.slice(-5),target:{id:target.id,author_id:target.author_id,text:String(target.normalized_text||target.content||'').slice(0,300)}});
+ try{
+  const res=await env.BUSHIN_AI.run(WORKERS_AI,{messages:[{role:'system',content:system},{role:'user',content:prompt}],max_tokens:120,temperature:0.3,response_format:{type:'json_object'}});
+  const parsed=JSON.parse(String(res?.response||''));
+  const raw=typeof parsed?.text==='string'?parsed.text.trim():'';
+  return replyText(raw,target);
+ }catch{return null;}
+}
 export async function workersAiPlan(env,{available=[],observations=[],channels=[],contextChannel=CHANNEL,last=null,goal=''}){
  if(!env.BUSHIN_AI||typeof env.BUSHIN_AI.run!=='function')return {error:'workers_ai_unavailable'};
  const usable=available.filter(c=>!c.options?.some(o=>o.required)).slice(0,18);
@@ -202,9 +213,19 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   const plannerOffline=saved.state.brain?.provider==='local-rules'&&Date.now()<(saved.state.planner_retry_at||0);
   const target=replyTarget(history.messages,owner,saved.state.chat_started_at||Date.now(),saved.state.reserved_reply_ids||[]);
   if(target&&plannerOffline){
-   // Chat replies need the model. Skip once (never send invented text) and keep using verified commands.
-   const next=await commit(d=>{d.reserved_reply_ids=(d.reserved_reply_ids||[]).concat(target.id).slice(-100);d.reason='IA sem cota: mensagem de chat não respondida. Jogo segue com regras locais verificadas.';d.next_tick_at=Date.now()+1000;return d});
-   return reply(view(next.state),200,HEAD);
+   let text=null;
+   if(env.BUSHIN_AI?.run)text=await workersAiChatReply(env,{conversation,target});
+   if(!text){
+    const next=await commit(d=>{d.reserved_reply_ids=(d.reserved_reply_ids||[]).concat(target.id).slice(-100);d.reason='IA sem cota: mensagem de chat não respondida. Jogo segue com regras locais.';d.next_tick_at=Date.now()+1000;return d});
+    return reply(view(next.state),200,HEAD);
+   }
+   const reservation=await update(d=>{if(d.run_id!==run||d.lease?.id!==lock||d.phase==='stopped'||(d.reserved_reply_ids||[]).includes(target.id))return null;d.reserved_reply_ids=(d.reserved_reply_ids||[]).concat(target.id).slice(-100);return d});
+   if(!reservation.changed)return reply(view(reservation.state),200,HEAD);
+   const beforeChat=(await readAutoplay(env,owner)).state;
+   if(beforeChat.run_id!==run||beforeChat.lease?.id!==lock||beforeChat.phase==='stopped')return reply(view(beforeChat),200,HEAD);
+   const sent=await sendChat(env,'bushin_naruto_personal_send',{channel_id:contextChannel,text,mention_ids:[target.author_id],reply_to:target.id,confirmed:true},ctx);
+   if(sent.sent!==true)throw Error(sent.reason||'O Discord não confirmou a mensagem. Não vou repetir.');
+   const next=await commit(d=>{d.steps++;d.reason='Resposta digitada no chat (Llama fallback).';d.plan_decision=null;d.reply_plan_target=null;d.last_chat_reply={id:sent.message_id,channel_id:contextChannel,text};d.brain={provider:'workers-ai',model:WORKERS_AI};d.next_tick_at=Date.now()+20000;recordAutoplay(d,'chat_sent','Resposta à mensagem '+target.id)});return reply(view(next.state),200,HEAD);
   }
   if(target){
    if(saved.state.plan_decision?.command!=='/reply'){
