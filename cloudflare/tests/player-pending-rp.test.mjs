@@ -35,6 +35,8 @@ test('definitively finished yet unconfirmed operation becomes paused and marked 
  assert.equal(state.code,'unconfirmed_result');
  assert.equal(state.uncertain_actions.length,1);
  assert.equal(state.uncertain_actions[0].command,'/acao coletar');
+ assert.equal(state.last_operation.id,PID);
+ assert.equal(state.history.at(-1).operation_id,PID);
  assert.match(state.reason,/não vou repeti-la automaticamente/);
  assert.equal(f.counters().channelCalls,0);
  const twice=await f.invoke('review');
