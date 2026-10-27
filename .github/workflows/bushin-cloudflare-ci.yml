@@ -59,6 +59,9 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode == 'ci' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      models: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -80,9 +83,12 @@ jobs:
               print('Bushin unificado no workflow principal; release/test genéricos preservados.')
           PY
       - name: Verificar sintaxe de todos os modulos Cloudflare
+        id: syntax_check
+        continue-on-error: true
         run: |
-          set -eu
-          for file in cloudflare/*.mjs; do node --check "$file"; done
+          mkdir -p dist/diagnostics
+          set -o pipefail
+          for file in cloudflare/*.mjs; do node --check "$file" || exit 1; done 2>&1 | tee dist/diagnostics/syntax.log
       - name: Verificar bindings, imports, interface e seguranca do projeto
         run: node scripts/verify-bushin-ci.mjs
       - name: Testar comportamento do Bushin com mocks (sem Discord real)
@@ -103,8 +109,24 @@ jobs:
           fi
           tail -n 30 dist/diagnostics/unit-tests.tap
       - name: Testar Jogar por mim, Parar, mensagens, limites e botoes sem Discord real
+        id: focused_tests
+        continue-on-error: true
         run: |
-          node --test cloudflare/tests/site-controls.test.mjs cloudflare/tests/player-loop.test.mjs cloudflare/tests/player-continuity.test.mjs cloudflare/tests/player-channel.test.mjs cloudflare/tests/fast-collection.test.mjs cloudflare/tests/discord-parity.test.mjs
+          set -o pipefail
+          node --test cloudflare/tests/site-controls.test.mjs cloudflare/tests/player-loop.test.mjs cloudflare/tests/player-continuity.test.mjs cloudflare/tests/player-channel.test.mjs cloudflare/tests/fast-collection.test.mjs cloudflare/tests/discord-parity.test.mjs 2>&1 | tee dist/diagnostics/focused-tests.log
+      - name: IA analisar erros e tentar reparar no ambiente temporario
+        if: ${{ steps.syntax_check.outcome == 'failure' || steps.unit_tests.outcome == 'failure' || steps.focused_tests.outcome == 'failure' }}
+        continue-on-error: true
+        env:
+          GH_MODELS_TOKEN: ${{ github.token }}
+          BUSHIN_CI_MODEL: openai/gpt-4.1-mini
+        run: python3 scripts/bushin_ai_ci.py
+      - name: Guardar diff da IA sem permitir deploy automaticamente
+        if: always()
+        run: |
+          if test -f dist/diagnostics/ai-repair.md; then
+            cat dist/diagnostics/ai-repair.md >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Validar scripts do executor e ponte Codex
         run: |
           python3 -m py_compile scripts/codex_bridge.py scripts/command_service.py scripts/naruto_guarded_mcp.py scripts/opencode_planner.py
@@ -151,9 +173,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
       - name: Falhar CI se os testes do Bushin falharam
-        if: always() && steps.unit_tests.outcome == 'failure'
+        if: always() && (steps.unit_tests.outcome == 'failure' || steps.syntax_check.outcome == 'failure' || steps.focused_tests.outcome == 'failure')
         run: |
-          echo '::error::Testes do Bushin falharam; consulte unit-tests.tap no artefato bushin-cloudflare-ci.'
+          echo '::error::Verificacao original falhou; IA registrou tentativa isolada, mas nao autoriza deploy. Consulte logs no artefato.'
           exit 1
 
   deploy:
