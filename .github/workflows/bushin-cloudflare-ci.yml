@@ -159,7 +159,7 @@ jobs:
   deploy:
     name: Publicar somente apos validacao completa
     needs: validate
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'ci' && inputs.publish == 'PUBLICAR' && github.ref == 'refs/heads/Projeto' }}
+    if: ${{ github.ref == 'refs/heads/Projeto' && ((github.event_name == 'workflow_dispatch' && inputs.mode == 'ci' && inputs.publish == 'PUBLICAR') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bushin-publicar-validado]'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
