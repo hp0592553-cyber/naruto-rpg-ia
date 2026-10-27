@@ -162,11 +162,28 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
  if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||!req.headers.get('content-type')?.startsWith('application/json'))return reply({error:'Origem inválida'},403,HEAD);
  let data;try{const text=await req.text();if(text.length>1500)throw Error();data=JSON.parse(text)}catch{return reply({error:'Pedido inválido'},400,HEAD)}
  const saved=await readAutoplay(env,owner);if(data.revision!==saved.state.revision&&!['stop','pause'].includes(data.action))return reply({error:'Estado mudou. Atualize antes de continuar.'},409,HEAD);
- const action=data.action;if(!['start','stop','tick','pause','resume','review','check_channel'].includes(action))return reply({error:'Ação inválida'},400,HEAD);
+ const action=data.action;if(!['start','stop','tick','pause','resume','review','check_channel','instruct'].includes(action))return reply({error:'Ação inválida'},400,HEAD);
  const update=fn=>changeAutoplay(env,owner,fn);
  const request=(path,body)=>new Request(baseUrl+'/mobile/discord2/api/ai/'+path,{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify(body)});
  const service=async body=>{const r=await commandServiceMobile(request('opencode',body),env,ctx,{unseal,baseUrl});const v=await r.json();if(!r.ok)throw Error(v.error||'Executor indisponível');return v};
  const lookup=async id=>(await commandServiceMobile(new Request(baseUrl+'/mobile/discord2/api/ai/opencode'+(id?'?request_id='+encodeURIComponent(id):'')),env,ctx,{unseal,baseUrl})).json();
+ if(action==='instruct'){
+  const goal=String(data.goal||'').trim().slice(0,500);
+  if(goal.length<3)return reply({error:'Escreva o que a IA deve fazer no RPG (pelo menos 3 caracteres).',code:'instruction_empty'},400,HEAD);
+  const next=await update(d=>{
+   if(d.revision!==saved.state.revision)return null;
+   d.goal=goal;d.instruction_at=Date.now();d.planner_retry_at=0;d.workers_ai_retry_at=0;
+   if(d.plan_pending)d.plan_stale=true;
+   else d.plan_decision=null;
+   if(['running','waiting','confirming'].includes(d.phase)){
+    d.reason=d.pending?'Novo pedido recebido. Vou conferir a ação pendente antes de continuar.':d.plan_pending?'Novo pedido recebido. Vou aguardar a consulta atual e descartar seu plano antigo.':'Novo pedido recebido. IA preparando a próxima ação.';
+    if(!d.pending&&!d.plan_pending)d.next_tick_at=Date.now()+1000;
+   }else d.reason='Novo pedido registrado. Pressione Jogar por mim para iniciar.';
+   recordAutoplay(d,'instruction_received','Novo objetivo registrado para a próxima decisão; nenhuma ação repetida.');
+   return d;
+  });
+  return reply(view(next.state),200,HEAD);
+ }
  if(action==='check_channel'){
   if(saved.state.lease?.until>Date.now())return reply({error:'A verificação aguardará uma operação em andamento. Nenhuma mensagem foi enviada.'},409,HEAD);
   const requested=String(data.channel_id||saved.state.context_channel_id||CHANNEL);
@@ -228,7 +245,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   const baseline=(await readAutoplay(env,owner)).state;
   // A stop arriving during session setup must win over this older start.
   if(baseline.revision!==startRevision)return reply(view(baseline),200,HEAD);
-  const next=await update(d=>{if(d.revision!==baseline.revision)return null;if(refreshPlanner)d.required_planner_revision='server-v5';const verified=d.channel_check?.read_verified===true&&Date.now()-Number(d.channel_check.checked_at||0)<300000&&d.channel_check.requested_id===String(data.channel_id||'');d.context_channel_id=verified?d.channel_check.channel_id:data.channel_id||d.context_channel_id||CHANNEL;if(verified&&d.context_channel_id!==data.channel_id)d.site_action={id:crypto.randomUUID(),type:'channel',channel_id:d.context_channel_id};d.chat_started_at=Date.now();d.goal=String(data.goal||d.goal||'Jogar Naruto Project até o nível 20.').slice(0,500);d.plan_pending=null;d.plan_decision=null;d.lease=null;d.phase=online?'running':'waiting';d.reason=online?'Lendo sua ficha e o estado do jogo.':'Conectando o executor. Nenhuma ação enviada ainda.';d.code=null;d.run_id=crypto.randomUUID();d.steps=0;if(!d.player_observations?.length){d.completed_keys=[];d.player_observations=[];}d.next_tick_at=Date.now()+1000;return d});return reply(view(next.state),200,HEAD);
+  const next=await update(d=>{if(d.revision!==baseline.revision)return null;if(refreshPlanner)d.required_planner_revision='server-v5';const verified=d.channel_check?.read_verified===true&&Date.now()-Number(d.channel_check.checked_at||0)<300000&&d.channel_check.requested_id===String(data.channel_id||'');d.context_channel_id=verified?d.channel_check.channel_id:data.channel_id||d.context_channel_id||CHANNEL;if(verified&&d.context_channel_id!==data.channel_id)d.site_action={id:crypto.randomUUID(),type:'channel',channel_id:d.context_channel_id};d.chat_started_at=Date.now();d.goal=String(data.goal||d.goal||'Jogar Naruto Project até o nível 20.').slice(0,500);d.plan_pending=null;d.plan_decision=null;d.plan_stale=false;d.lease=null;d.phase=online?'running':'waiting';d.reason=online?'Lendo sua ficha e o estado do jogo.':'Conectando o executor. Nenhuma ação enviada ainda.';d.code=null;d.run_id=crypto.randomUUID();d.steps=0;if(!d.player_observations?.length){d.completed_keys=[];d.player_observations=[];}d.next_tick_at=Date.now()+1000;return d});return reply(view(next.state),200,HEAD);
  }
  if(!['running','waiting','confirming'].includes(saved.state.phase))return reply(view(saved.state),200,HEAD);
  if(saved.state.lease&&saved.state.lease.until>Date.now())return reply(view(saved.state),200,HEAD);
@@ -240,6 +257,10 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   if(saved.state.plan_pending){
    const result=await lookup(saved.state.plan_pending);
     if(['queued','in_progress'].includes(result.state)){const next=await commit(d=>{d.reason='OpenCode está decidindo a próxima ação.';d.next_tick_at=Date.now()+2000});return reply(view(next.state),200,HEAD)}
+    if(saved.state.plan_stale){
+     const next=await commit(d=>{d.plan_pending=null;d.plan_decision=null;d.plan_stale=false;d.reason='Novo pedido recebido: plano anterior descartado. Solicitando novo plano.';d.next_tick_at=Date.now()+500;recordAutoplay(d,'plan_discarded','Plano anterior ao pedido atual; nenhum comando enviado.');return d});
+     return reply(view(next.state),200,HEAD);
+    }
     if(!result.brain?.plan){
      const error=String(result.brain?.error||result.note||result.state||'planner_unavailable').slice(0,120);
      if(!result.brain?.error&&!['finished','stopped','uncertain','unknown','expired'].includes(result.state))throw Error('OpenCode não retornou um plano: '+error);
@@ -306,7 +327,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   }
   if(target){
    if(saved.state.plan_decision?.command!=='/reply'){
-    const planningContext=JSON.stringify({task:'Responder de forma curta e casual em português, sem inventar fatos ou prometer ações.',conversation,target:{id:target.id,author_id:target.author_id,text:target.normalized_text||target.content},commands:[{command:'/reply',options:[{name:'text',type:3,required:true}]}],channels:[{id:contextChannel}]});
+    const planningContext=JSON.stringify({task:'Responder de forma curta e casual em português, sem inventar fatos ou prometer ações.',goal:String(saved.state.goal||'').slice(0,500),conversation,target:{id:target.id,author_id:target.author_id,text:target.normalized_text||target.content},commands:[{command:'/reply',options:[{name:'text',type:3,required:true}]}],channels:[{id:contextChannel}]});
     const queued=await service({action:'start',run_id:run,command_request:{command:'/agent-plan',channel_id:contextChannel,options:{context:planningContext}}});
     const next=await commit(d=>{d.plan_pending=queued.request_id;d.plan_decision=null;d.reply_plan_target=target.id;d.reason='OpenCode está preparando a resposta no contexto do chat.';d.next_tick_at=Date.now()+2000});return reply(view(next.state),200,HEAD);
    }
