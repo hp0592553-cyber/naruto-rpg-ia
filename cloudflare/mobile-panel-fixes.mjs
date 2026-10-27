@@ -188,15 +188,15 @@ async function send(){
   js=replaceOnce(js,'note.textContent=m.own_response?"Toque nas opções desta caixa para agir no jogo."',
    'note.textContent=liveOwnResponse(m)?"Toque nas opções desta caixa para agir no jogo."');
  // Add real inline AI option cards instead of a generic question that loses message IDs.
- js=replaceSection(js,'const ask=document.createElement("button");ask.className="gameAskAi";','const note=document.createElement("div");',()=> 'appendAiOptionCard(parent,m);\\n ');
+ js=replaceSection(js,'const ask=document.createElement("button");ask.className="gameAskAi";','const note=document.createElement("div");',()=> 'appendAiOptionCard(parent,m);\n ');
  js=replaceOnce(js,'if(liveOwnResponse(m)){for(const c of m.controls||[])appendOwnGameControl(parent,m,c);return;}',
    'if(liveOwnResponse(m)){for(const c of m.controls||[])appendOwnGameControl(parent,m,c);appendAiOptionCard(parent,m);return;}');
  js=replaceOnce(js,'root.append(note);host.append(root);return true;',
    'root.append(note);host.append(root);appendAiOptionCard(host,m);return true;');
  js=replaceOnce(js,'if(!controls.length)return;',
    'if(!controls.length){appendAiOptionCard(host,response);host.hidden=false;return;}');
- js=replaceOnce(js,'for(const c of controls)appendOwnGameControl(group,response,c);\\n host.hidden=false;',
-   'for(const c of controls)appendOwnGameControl(group,response,c);\\n appendAiOptionCard(host,response);\\n host.hidden=false;');
+ js=replaceOnce(js,'for(const c of controls)appendOwnGameControl(group,response,c);\n host.hidden=false;',
+   'for(const c of controls)appendOwnGameControl(group,response,c);\n appendAiOptionCard(host,response);\n host.hidden=false;');
 
 
  js=replaceSection(js,'const slashProgressKey=','async function sendSelectedSlash(',part=>{
