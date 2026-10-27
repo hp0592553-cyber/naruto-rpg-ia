@@ -21,7 +21,7 @@ test('player queues a correlated query, stop prevents further actions, unconfirm
   env.DISCORD_USER_TOKEN='synthetic-personal-credential-for-tests-only-123456789';
  env.BUSHIN_AI={async run(_model,args){const input=JSON.parse(args.messages[1].content);const next=input.commands.find(x=>x.command==='/perfil ver');return {response:JSON.stringify(next?{command:next.command,channel_id:next.channel_id,options:{}}:{command:'',reason:'Sem comando verificado'})}}};
  const ctx={me:{id:owner,membership:{member:true}}},baseUrl='https://example.test';
- const helpers={reply:(v,s)=>Response.json(v,{status:s}),baseUrl,readChat:async()=>({read:true,messages:[]}),listChannels:async()=>({listed:true,visibility_filtered:true,channels:[{id:channel,name:'Comandos',type:0}]}),seal:async x=>x,unseal:async x=>x};
+ const helpers={reply:(v,s)=>Response.json(v,{status:s}),baseUrl,readChat:async()=>({read:true,messages:[]}),listChannels:async()=>({listed:true,visibility_filtered:true,channels:[{id:channel,name:'Comandos',type:0}]}),learn:async()=>({initial:false,evidence:[]}),seal:async x=>x,unseal:async x=>x};
  const call=async data=>{let req=data?new Request(baseUrl+'/mobile/discord2/api/autoplay',{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify(data)}):new Request(baseUrl+'/mobile/discord2/api/autoplay');return (await playerRoute(req,env,ctx,helpers)).json()};
  let r=await call();r=await call({action:'start',revision:r.state.revision});
  r=await call({action:'tick',revision:r.state.revision});assert.equal(r.state.phase,'confirming',JSON.stringify({reason:r.state.reason,brain:r.state.brain,code:r.state.code}));assert.equal(r.state.pending.action.command,'/perfil ver');
