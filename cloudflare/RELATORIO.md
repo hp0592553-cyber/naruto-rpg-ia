@@ -32,3 +32,12 @@ OAuth atual fornece identidade e participação, não execução de interações
 A arquitetura compatível disponível é observar evidências fornecidas por uma fonte autorizada, propor ações e executá-las pelo titular no cliente oficial. Automação integral precisaria de uma interface autorizada do próprio jogo, fornecida pelos responsáveis, com associação de personagem e confirmação de resultados. Não existe essa interface configurada no projeto. Nenhum contorno de bloqueio, envio automático ou encerramento de combate foi acrescentado.
 
 Referências: https://docs.discord.com/developers/components/reference ; https://docs.discord.com/developers/interactions/application-commands ; https://support.discord.com/hc/en-us/articles/115002192352-Automated-User-Accounts-Self-Bots ; https://modelcontextprotocol.io/specification/2025-11-25/server/tools
+
+## Atualização — 27/10/2026: IA do HTML e publicação validada
+
+- No Discord 2, a análise da IA mostra se o modelo foi de fato acionado e quantas mensagens foram lidas.
+- O modo automático agora consulta o modelo mesmo antes de haver ficha persistida, **somente** quando há evidência ligada ao dono (mensagem dele ou resposta correlacionada). Sem essa evidência, continua pedindo a ficha, sem usar status de outros jogadores.
+- Testes com mocks cobrem invocação real do modelo, integridade da resposta e proibição de registrar execução não confirmada.
+- CI aprovado na branch `Projeto`: https://github.com/hp0592553-cyber/naruto-rpg-ia/actions/runs/40559143264
+- Esta publicação não comprova conexão online com Discord nem execução de comandos do RPG. A última sessão do executor falhou em `Discord connection unavailable; nothing sent`; exige diagnóstico separado, sem repetir envio e sem expor token.
+- Deploy controlado pelo único YAML principal, preservando bindings e Secrets existentes.
