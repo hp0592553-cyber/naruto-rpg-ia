@@ -139,11 +139,32 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
  if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||!req.headers.get('content-type')?.startsWith('application/json'))return reply({error:'Origem inválida'},403,HEAD);
  let data;try{const text=await req.text();if(text.length>1500)throw Error();data=JSON.parse(text)}catch{return reply({error:'Pedido inválido'},400,HEAD)}
  const saved=await readAutoplay(env,owner);if(data.revision!==saved.state.revision&&!['stop','pause'].includes(data.action))return reply({error:'Estado mudou. Atualize antes de continuar.'},409,HEAD);
- const action=data.action;if(!['start','stop','tick','pause','resume','review'].includes(action))return reply({error:'Ação inválida'},400,HEAD);
+ const action=data.action;if(!['start','stop','tick','pause','resume','review','check_channel'].includes(action))return reply({error:'Ação inválida'},400,HEAD);
  const update=fn=>changeAutoplay(env,owner,fn);
  const request=(path,body)=>new Request(baseUrl+'/mobile/discord2/api/ai/'+path,{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify(body)});
  const service=async body=>{const r=await commandServiceMobile(request('opencode',body),env,ctx,{unseal,baseUrl});const v=await r.json();if(!r.ok)throw Error(v.error||'Executor indisponível');return v};
  const lookup=async id=>(await commandServiceMobile(new Request(baseUrl+'/mobile/discord2/api/ai/opencode'+(id?'?request_id='+encodeURIComponent(id):'')),env,ctx,{unseal,baseUrl})).json();
+ if(action==='check_channel'){
+  if(saved.state.pending||saved.state.lease?.until>Date.now())return reply({error:'Existe uma operação pendente; confira o resultado antes de verificar outro canal.'},409,HEAD);
+  const requested=String(data.channel_id||saved.state.context_channel_id||CHANNEL);
+  if(!/^\d{15,22}$/.test(requested))return reply({error:'Canal inválido.'},400,HEAD);
+  const listed=await listChannels(env,ctx);
+  if(!listed?.listed||listed.visibility_filtered!==true)return reply({error:listed?.reason||'Não foi possível validar os canais acessíveis agora.'},503,HEAD);
+  const chosen=choosePlayerChannel({channels:listed.channels,selectedId:requested,previousId:saved.state.context_channel_id,location:saved.state.snapshot?.location});
+  if(!chosen.channel_id)return reply({error:chosen.reason},409,HEAD);
+  const looked=await readChat(env,'bushin_naruto_personal_read',{channel_id:chosen.channel_id,limit:6},ctx);
+  if(!looked?.read)return reply({error:looked?.reason||'O canal selecionado não confirmou leitura.',code:looked?.code||null,retry_after_seconds:looked?.retry_after_seconds||null},looked?.code===429?429:503,HEAD);
+  const details={...chosen,requested_id:requested,checked_at:Date.now(),read_verified:true,read_messages:(looked.messages||[]).length};
+  const next=await update(d=>{
+   if(d.revision!==saved.state.revision)return null;
+   d.channel_check=details;
+   // No channel change during a running session, no messages or slash commands sent.
+   if(!['running','waiting','confirming'].includes(d.phase)&&!d.pending)d.context_channel_id=chosen.channel_id;
+   recordAutoplay(d,'channel_checked',chosen.channel_name);
+   return d;
+  });
+  return reply(view(next.state),200,HEAD);
+ }
  if(action==='stop'||action==='pause'){
    const next=await update(d=>{d.phase=action==='pause'?'paused':'stopped';d.code=null;d.reason=(action==='pause'?'Pausado.':'Parado.')+' Uma ação já recebida pelo jogo pode terminar.';d.run_id=null;d.lease=null;d.plan_pending=null;return d});
   try{await service({action:'stop'})}catch{}
@@ -183,7 +204,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   const baseline=(await readAutoplay(env,owner)).state;
   // A stop arriving during session setup must win over this older start.
   if(baseline.revision!==startRevision)return reply(view(baseline),200,HEAD);
-  const next=await update(d=>{if(d.revision!==baseline.revision)return null;if(refreshPlanner)d.required_planner_revision='server-v5';d.context_channel_id=data.channel_id||d.context_channel_id||CHANNEL;d.chat_started_at=Date.now();d.plan_pending=null;d.plan_decision=null;d.lease=null;d.phase=online?'running':'waiting';d.reason=online?'Lendo sua ficha e o estado do jogo.':'Conectando o executor. Nenhuma ação enviada ainda.';d.code=null;d.run_id=crypto.randomUUID();d.steps=0;if(!d.player_observations?.length){d.completed_keys=[];d.player_observations=[];}d.next_tick_at=Date.now()+1000;return d});return reply(view(next.state),200,HEAD);
+  const next=await update(d=>{if(d.revision!==baseline.revision)return null;if(refreshPlanner)d.required_planner_revision='server-v5';const verified=d.channel_check?.read_verified===true&&Date.now()-Number(d.channel_check.checked_at||0)<300000&&d.channel_check.requested_id===String(data.channel_id||'');d.context_channel_id=verified?d.channel_check.channel_id:data.channel_id||d.context_channel_id||CHANNEL;if(verified&&d.context_channel_id!==data.channel_id)d.site_action={id:crypto.randomUUID(),type:'channel',channel_id:d.context_channel_id};d.chat_started_at=Date.now();d.plan_pending=null;d.plan_decision=null;d.lease=null;d.phase=online?'running':'waiting';d.reason=online?'Lendo sua ficha e o estado do jogo.':'Conectando o executor. Nenhuma ação enviada ainda.';d.code=null;d.run_id=crypto.randomUUID();d.steps=0;if(!d.player_observations?.length){d.completed_keys=[];d.player_observations=[];}d.next_tick_at=Date.now()+1000;return d});return reply(view(next.state),200,HEAD);
  }
  if(!['running','waiting','confirming'].includes(saved.state.phase))return reply(view(saved.state),200,HEAD);
  if(saved.state.lease&&saved.state.lease.until>Date.now())return reply(view(saved.state),200,HEAD);
@@ -232,10 +253,11 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
    if([403,404].includes(Number(history.code))){
     const listed=await listChannels(env,ctx);
     if(!listed.listed||!listed.visibility_filtered)throw Error('Não foi possível atualizar os canais permitidos após a mudança de acesso.');
-    const readable=listed.channels.filter(c=>[0,5].includes(Number(c.type))&&c.id!==contextChannel);
-    const route=readable.find(c=>String(c.name).normalize('NFKD').toLowerCase().includes('caminho'))||readable.find(c=>c.id===CHANNEL);
-    if(!route)throw Error('O canal anterior ficou indisponível e o jogo ainda não liberou um canal de caminho ou comandos.');
-    const next=await commit(d=>{d.context_channel_id=route.id;d.site_action={id:crypto.randomUUID(),type:'channel',channel_id:route.id};d.reason='Acesso mudou. Canal permitido atualizado; vou ler o contexto antes de agir.';d.phase='waiting';d.next_tick_at=Date.now()+3000;recordAutoplay(d,'access_changed',route.id)});
+    const choice=choosePlayerChannel({channels:listed.channels,selectedId:null,previousId:null,location:saved.state.snapshot?.location});
+    if(!choice.channel_id||choice.channel_id===contextChannel)throw Error('Canal inacessível e nenhum outro canal do RPG confirmado. Não vou escolher um canal aleatório.');
+    const verified=await readChat(env,'bushin_naruto_personal_read',{channel_id:choice.channel_id,limit:1},ctx);
+    if(!verified.read)throw Error(verified.reason||'O canal alternativo não permitiu leitura.');
+    const next=await commit(d=>{d.context_channel_id=choice.channel_id;d.channel_check={...choice,requested_id:choice.channel_id,checked_at:Date.now(),read_verified:true,read_messages:(verified.messages||[]).length};d.site_action={id:crypto.randomUUID(),type:'channel',channel_id:choice.channel_id};d.reason='O canal antigo perdeu acesso. Novo canal verificado por leitura, sem enviar mensagem.';d.phase='waiting';d.next_tick_at=Date.now()+3000;recordAutoplay(d,'access_changed',choice.channel_id)});
     return reply(view(next.state),200,HEAD);
    }
    throw Error(history.reason||'Não foi possível ler o contexto atual do chat.');
