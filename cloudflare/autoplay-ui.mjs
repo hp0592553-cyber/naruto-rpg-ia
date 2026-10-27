@@ -15,12 +15,50 @@ export const AUTOPLAY_HTML=String.raw`
    <div id="autoplayChannelStatus" class="hint" role="status" aria-live="polite">Canal ainda não verificado.</div>
   <div id="autoplayStats"></div><div id="autoplayAction"></div><div id="autoplayStages"></div>
   <div id="autoplayResult"></div><div id="autoplayPersistence"></div><div id="autoplayHistory"></div>
+   <details id="autoplayLogs"><summary>🧾 Logs de erros e diagnóstico</summary>
+    <p class="hint">Erros do painel e eventos do jogador, sem credenciais. Não inclui logs internos da Cloudflare.</p>
+    <button type="button" id="autoplayCopyLogs">Copiar logs</button>
+    <button type="button" id="autoplayClearLogs">Limpar erros deste navegador</button>
+    <pre id="autoplayLogText" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:330px;overflow-y:auto;font-size:12px"></pre>
+   </details>
    <details id="autoplayMissing"><summary>Conexão e requisitos</summary><p id="autoplayIntegration"></p></details>
   </details>
 </section>`;
 export const AUTOPLAY_JS=String.raw`
 let autoplayData=null,autoplayControlBusy=false,autoplayStopBusy=false,autoplayTickBusy=false,autoplayPollingFailed=false,autoplayShownOperation=null,autoplayShownReply=null,autoplaySiteAction=null;
 let autoplayChannelRefreshBusy=false,autoplayChannelRetryAt=0,autoplayTransientRetryAt=0;
+const autoplayLogKey="bushin_autoplay_errors_v2";
+let autoplayClientErrors=[];
+try{const previous=JSON.parse(sessionStorage.getItem(autoplayLogKey)||"[]");if(Array.isArray(previous))autoplayClientErrors=previous.slice(-120)}catch{}
+function autoplaySafeLog(s){
+ return String(s||"").replace(/Bearer\s+\S+/gi,"Bearer [oculto]").replace(/(?:mfa\.[\w-]{30,}|[\w-]{18,}\.[\w-]{5,}\.[\w-]{18,})/g,"[credencial oculta]").replace(/(token|secret|password|authorization|cookie)\s*[:=]\s*[^\s,;]+/gi,"$1=[oculto]").slice(0,480);
+}
+function autoplayRetryMs(error){
+ const s=String(error?.message||"");
+ const match=s.match(/Aguarde\s+(\d+)\s+segundos/i);
+ const seconds=Number(error?.retryAfter)||Number(match?.[1])||0;
+ return Math.min(900000,Math.max(30000,seconds*1000));
+}
+function autoplayLogError(source,error){
+ const item={at:Date.now(),source:String(source).slice(0,40),http:Number(error?.httpStatus)||null,code:autoplaySafeLog(error?.code||error?.errorCode||""),message:autoplaySafeLog(error?.message||error)};
+ autoplayClientErrors.push(item);autoplayClientErrors=autoplayClientErrors.slice(-120);
+ try{sessionStorage.setItem(autoplayLogKey,JSON.stringify(autoplayClientErrors))}catch{}
+ autoplayRenderLogs();
+}
+function autoplayRenderLogs(){
+ const el=E("autoplayLogText");if(!el)return;
+ const s=autoplayData?.state||{},events=(s.history||[]).filter(x=>/error|failed|unconfirmed|blocked|not_sent|planner|rate|access/i.test(String(x.type)+" "+String(x.detail))).slice(-60);
+ const rows=["Estado: "+(s.phase||"desconhecido")+" · "+autoplaySafeLog(s.code||"sem código"),
+ "Motivo: "+autoplaySafeLog(s.reason||"sem mensagem"),"Modelo: "+autoplaySafeLog(autoplayData?.planner?.mode||"auto")+" · "+autoplaySafeLog(autoplayData?.planner?.error||"sem erro"),
+ "Executor: "+(autoplayData?.integration?.executor_online?"online":"offline"),"Próxima consulta: "+(s.next_tick_at?new Date(s.next_tick_at).toLocaleString("pt-BR"):"não agendada"),
+ "","— Erros vistos neste navegador ("+autoplayClientErrors.length+") —"];
+ for(const e of autoplayClientErrors.slice().reverse())rows.push(new Date(e.at).toLocaleString("pt-BR")+" | "+e.source+" | HTTP "+(e.http||"—")+" | "+e.code+" | "+e.message);
+ rows.push("","— Falhas e bloqueios registrados no servidor ("+events.length+" dos últimos 60 eventos) —");
+ for(const e of events.slice().reverse())rows.push(new Date(e.at).toLocaleString("pt-BR")+" | "+autoplaySafeLog(e.type)+" | "+autoplaySafeLog(e.detail));
+ el.textContent=rows.join("\n");
+}
+E("autoplayCopyLogs").onclick=async()=>{try{await navigator.clipboard.writeText(E("autoplayLogText").textContent);status("Logs copiados.",false)}catch(e){status("Não foi possível copiar os logs.",true)}};
+E("autoplayClearLogs").onclick=()=>{autoplayClientErrors=[];try{sessionStorage.removeItem(autoplayLogKey)}catch{}autoplayRenderLogs()};
 function updateCollectionStatus(){
  const host=E("autoplayCollectNotice"),box=autoplayData?.state?.last_result?.response;
  if(!host||!box||String(box.channel_id||"")!==String(S.current||"")||!/coleta:\s*como funciona/i.test(String(box.normalized_text||box.content||""))){if(host)host.hidden=true;return;}
@@ -50,7 +88,7 @@ async function refreshAutoplayChannels(action){
 }
 function renderAutoplay(data){
  if(!data?.state||autoplayData?.state?.revision>data.state.revision)return;
- autoplayData=data;updateCollectionStatus();const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
+ autoplayData=data;updateCollectionStatus();autoplayRenderLogs();const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
   const missing=(data.integration?.missing||[]).join("; ");
   E("autoplayStatus").textContent=data.integration?.configured===false?"Execução bloqueada: "+(missing||s.reason||"adaptador autorizado indisponível"):(s.phase==="stopped"?"Parado.":(labels[s.phase]||s.phase)+" · "+(s.reason||""));
   if(data.planner?.local)E("autoplayStatus").textContent+=" · piloto local por regras (IA sem cota)";
@@ -91,7 +129,7 @@ function renderAutoplay(data){
 }
 async function refreshAutoplay(){
  try{const data=await req("/autoplay");renderAutoplay(data);return data;}
- catch(e){E("autoplayStatus").textContent="Não foi possível ler o agente: "+e.message;return null;}
+ catch(e){autoplayLogError("GET /autoplay",e);E("autoplayStatus").textContent="Não foi possível ler o agente: "+e.message;return null;}
 }
 async function controlAutoplay(action,goal){
  // Stop has its own lane: never wait for a start, tick, GET or model response.
@@ -100,10 +138,12 @@ async function controlAutoplay(action,goal){
   if(autoplayData)renderAutoplay(autoplayData);
   E("autoplayStatus").textContent="Parando novas ações…";
   try{const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action,revision:autoplayData?.state?.revision||0})});renderAutoplay(data);autoplayPollingFailed=false;return data;}
-  catch(e){autoplayPollingFailed=true;stopError="Parada não confirmada: "+e.message;return null;}
+  catch(e){autoplayLogError(action+" /autoplay",e);autoplayPollingFailed=true;stopError="Parada não confirmada: "+e.message;return null;}
   finally{autoplayStopBusy=false;if(autoplayData)renderAutoplay(autoplayData);if(stopError)E("autoplayStatus").textContent=stopError;}
  }
- if(autoplayControlBusy||autoplayStopBusy)return null;autoplayControlBusy=true;let failedNotice=null,requestedRevision=null;
+ if(autoplayControlBusy||autoplayStopBusy)return null;
+ if(["start","resume","check_channel"].includes(action)&&Date.now()<autoplayTransientRetryAt){const left=Math.ceil((autoplayTransientRetryAt-Date.now())/1000);E("autoplayStatus").textContent="Discord em espera: "+left+" segundos restantes. Nenhum comando repetido.";return null}
+ autoplayControlBusy=true;let failedNotice=null,requestedRevision=null;
  if(autoplayData)renderAutoplay(autoplayData);
  try{
   let current=await refreshAutoplay();if(!current)throw Error("Estado indisponível");
@@ -126,7 +166,9 @@ async function controlAutoplay(action,goal){
   requestedRevision=current.state.revision;
   const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action,revision:current.state.revision,...(action==="start"||action==="resume"?{goal:goal||E("autoplayGoal").value,channel_id:S.current}:action==="check_channel"?{channel_id:S.current}:{})})});
   renderAutoplay(data);autoplayPollingFailed=false;return data;
- }catch(e){const latest=await refreshAutoplay();if(!(latest?.state?.phase==="stopped"&&requestedRevision!==null&&latest.state.revision>requestedRevision))failedNotice="Pedido não concluído: "+e.message;return null;}
+ }catch(e){autoplayLogError(action+" /autoplay",e);
+  if(e.rateLimited||/429|Aguarde\s+\d+\s+segundos/i.test(String(e.message||"")))autoplayTransientRetryAt=Date.now()+autoplayRetryMs(e);
+  const latest=await refreshAutoplay();if(!(latest?.state?.phase==="stopped"&&requestedRevision!==null&&latest.state.revision>requestedRevision))failedNotice="Pedido não concluído: "+e.message;E("autoplayLogs").open=true;return null;}
  finally{autoplayControlBusy=false;if(autoplayData)renderAutoplay(autoplayData);if(failedNotice)E("autoplayStatus").textContent=failedNotice;}
 }
 async function autoplayTick(){
@@ -135,10 +177,12 @@ async function autoplayTick(){
  autoplayTickBusy=true;
  try{const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action:"tick",revision:s.revision})});renderAutoplay(data);}
  catch(e){
+  autoplayLogError("tick /autoplay",e);
   await refreshAutoplay();
   const temporary=e.rateLimited||e.httpStatus>=500||/temporarily unavailable|temporariamente indispon[ií]vel|timeout|HTTP 5\d\d|Discord indispon[ií]vel/i.test(String(e.message||""));
   if(temporary){
-   const delay=e.rateLimited?Math.max(30000,Number(e.retryAfter||30)*1000):15000;
+   E("autoplayLogs").open=true;
+   const delay=e.rateLimited||/429|Aguarde\s+\d+\s+segundos/i.test(String(e.message||""))?autoplayRetryMs(e):15000;
    autoplayTransientRetryAt=Date.now()+delay;autoplayPollingFailed=false;
    E("autoplayStatus").textContent="Conexão temporariamente indisponível. Aguardando nova consulta, sem repetir comandos: "+e.message;
   }else{autoplayPollingFailed=true;E("autoplayStatus").textContent="Acompanhamento interrompido: "+e.message;}
