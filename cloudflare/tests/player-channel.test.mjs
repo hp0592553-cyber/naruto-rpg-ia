@@ -76,5 +76,5 @@ test('channel check fails closed on unverified visibility or missing read permis
 test('Android player displays the checked channel and checks before starting',()=>{
  assert.match(AUTOPLAY_HTML,/autoplayChannelCheck/);
  assert.match(AUTOPLAY_JS,/action:"check_channel"/);
- assert.match(AUTOPLAY_JS,/channel\.read_verified/);
+ assert.match(AUTOPLAY_JS,/channel\?\.read_verified/);
 });
