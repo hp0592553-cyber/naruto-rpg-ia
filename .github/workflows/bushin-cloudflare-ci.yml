@@ -32,12 +32,20 @@ on:
       - 'scripts/export-discord2-html.mjs'
       - 'scripts/verify-bushin-ci.mjs'
       - '.github/workflows/bushin-cloudflare-ci.yml'
+      - 'scripts/command_service.py'
+      - 'scripts/opencode_planner.py'
+      - 'scripts/test_command_service.py'
+      - 'tests/test_opencode_planner.py'
   pull_request:
     paths:
       - 'cloudflare/**'
       - 'scripts/export-discord2-html.mjs'
       - 'scripts/verify-bushin-ci.mjs'
       - '.github/workflows/bushin-cloudflare-ci.yml'
+      - 'scripts/command_service.py'
+      - 'scripts/opencode_planner.py'
+      - 'scripts/test_command_service.py'
+      - 'tests/test_opencode_planner.py'
 
 permissions:
   contents: read
@@ -71,9 +79,9 @@ jobs:
           mkdir -p dist/diagnostics
           node --test --test-reporter=tap cloudflare/tests/*.test.mjs > dist/diagnostics/unit-tests.tap 2>&1 || { tail -n 100 dist/diagnostics/unit-tests.tap; exit 1; }
           tail -n 30 dist/diagnostics/unit-tests.tap
-      - name: Testar Jogar por mim, Parar e roteamento sem Discord real
+      - name: Testar Jogar por mim, Parar, mensagens, limites e botoes sem Discord real
         run: |
-          node --test cloudflare/tests/site-controls.test.mjs cloudflare/tests/player-loop.test.mjs cloudflare/tests/player-channel.test.mjs
+          node --test cloudflare/tests/site-controls.test.mjs cloudflare/tests/player-loop.test.mjs cloudflare/tests/player-continuity.test.mjs cloudflare/tests/player-channel.test.mjs cloudflare/tests/fast-collection.test.mjs cloudflare/tests/discord-parity.test.mjs
       - name: Validar scripts do executor e ponte Codex
         run: |
           python3 -m py_compile scripts/codex_bridge.py scripts/command_service.py scripts/naruto_guarded_mcp.py scripts/opencode_planner.py
@@ -98,6 +106,16 @@ jobs:
         run: node --check dist/discord2/app.js
       - name: Compilar Worker em modo dry-run (sem publicar)
         run: npx --yes wrangler@4 deploy --config cloudflare/wrangler.jsonc --dry-run --outdir dist/worker-build
+      - name: Registrar resumo da validacao
+        if: always()
+        run: |
+          {
+            echo '## Bushin · validação unificada'
+            echo 'Branch: `${{ github.ref_name }}` · Commit: `${{ github.sha }}`'
+            echo 'HTML exportado, Worker dry-run, testes JS, Jogar por mim/Parar e ponte Python.'
+            echo 'Resultados completos e falhas: artefato `bushin-cloudflare-ci`.'
+            echo 'Os testes são simulados; não comprovam comando enviado ou XP ganho no Discord.'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Guardar HTML e build para diagnostico
         if: always()
         uses: actions/upload-artifact@v4
@@ -118,7 +136,7 @@ jobs:
   deploy:
     name: Publicar somente apos validacao completa
     needs: validate
-    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/Projeto') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci' && inputs.publish == 'PUBLICAR' && github.ref == 'refs/heads/Projeto') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'ci' && inputs.publish == 'PUBLICAR' && github.ref == 'refs/heads/Projeto' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
