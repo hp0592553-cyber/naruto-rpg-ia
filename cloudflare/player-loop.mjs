@@ -475,7 +475,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
      // observation. Never fall back to travel, collection, fighting or buttons.
      if(!selected){
       const observation=local();
-      const readOnlyFallback=/^\\/(?:perfil (?:ver|nivel|atributos|cooldowns)|nivel|missoes (?:minhas|ativas|diarias|semanais)|mapa)$/;
+      const readOnlyFallback=/^\/(?:perfil (?:ver|nivel|atributos|cooldowns)|nivel|missoes (?:minhas|ativas|diarias|semanais)|mapa)$/;
       if(observation&&readOnlyFallback.test(observation.command)&&!context.some(o=>o.command===observation.command&&String(o.channel_id||CHANNEL)===String(observation.channel_id))){
        selected={...observation,provider:'local-rules',model:'catalog-v2',reason:'Consulta informativa verificada após falha do Llama; sem repetir comando observado.'};
       }
