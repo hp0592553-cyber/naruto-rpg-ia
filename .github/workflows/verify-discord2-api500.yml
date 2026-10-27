@@ -1,0 +1,22 @@
+name: Discord 2 API 500 Fix
+on:
+  push:
+    branches: [fix/discord2-api500-graceful-errors-20261027]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Check Worker syntax
+        run: |
+          node --check cloudflare/player-loop.mjs
+          node --check cloudflare/discord2-ui.mjs
+      - name: Test channel recovery and error display
+        run: timeout 100s node --test cloudflare/tests/player-channel.test.mjs
