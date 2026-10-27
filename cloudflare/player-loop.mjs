@@ -120,6 +120,7 @@ export async function workersAiPlan(env,{available=[],observations=[],uncertain=
  if(fields.some(f=>f.required&&!Object.hasOwn(options,f.name)))return {error:'missing_option',command};
  const candidates=planningChannels(channels,contextChannel,location);
  const channel=definition.verified_channel;
+ if(choice.channel_id!=null&&String(choice.channel_id)!==String(channel))return {error:'wrong_command_channel',command};
  if(!candidates.some(c=>c.id===channel))return {error:'verified_channel_unavailable',command};
  // The model chooses the command, the verified router chooses its allowed channel.
  return {plan:{command,options,channel_id:channel,reason:String(choice.reason||'Decisão do motor Llama no Worker.').slice(0,300),provider:'workers-ai',model:WORKERS_AI},model:WORKERS_AI};
