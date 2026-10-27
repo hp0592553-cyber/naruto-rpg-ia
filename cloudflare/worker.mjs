@@ -228,6 +228,35 @@ async function rememberDiscordOAuth429(env,seconds,path){
   await env.DB.prepare("INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at WHERE CAST(json_extract(bushin_project_state.value_json,'$.until') AS INTEGER) < CAST(json_extract(excluded.value_json,'$.until') AS INTEGER)")
     .bind(String(env.BUSHIN_OWNER_DISCORD_ID),OAUTH_COOLDOWN_KEY,json,stamp).run();
 }
+// Verified Discord OAuth role snapshot, retained briefly to reduce repeated
+// /member + /guilds calls. A stale snapshot must not grant access indefinitely.
+const DISCORD2_VISIBILITY_CACHE_KEY="discord2_oauth_visibility_v1";
+async function discord2VerifiedVisibility(env,auth,userId){
+  const ownerId=String(userId);
+  try{
+    const saved=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?")
+      .bind(ownerId,DISCORD2_VISIBILITY_CACHE_KEY).first();
+    if(saved){
+      const cached=JSON.parse(saved.value_json);
+      const v=cached.visibility;
+      if(cached.until>Date.now()&&v?.memberId===ownerId&&Array.isArray(v.roles)&&
+        v.roles.every(id=>/^\\d{15,22}$/.test(String(id)))&&/^\\d+$/.test(String(v.basePermissions||'')))return v;
+    }
+  }catch{}
+  const [member,guilds]=await Promise.all([
+    discordFetch(auth.access,"/users/@me/guilds/"+NARUTO_GUILD_ID+"/member",env),
+    discordFetch(auth.access,"/users/@me/guilds",env)
+  ]);
+  const guild=Array.isArray(guilds)?guilds.find(g=>String(g.id)===NARUTO_GUILD_ID):null;
+  const permissions=guild?.permissions??guild?.permissions_new;
+  if(!Array.isArray(member?.roles)||!/^\\d+$/.test(String(permissions??'')))return null;
+  const visibility={memberId:ownerId,roles:member.roles,basePermissions:String(permissions)};
+  try{
+    await env.DB.prepare("INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at")
+      .bind(ownerId,DISCORD2_VISIBILITY_CACHE_KEY,JSON.stringify({until:Date.now()+45000,visibility}),Date.now()).run();
+  }catch{}
+  return visibility;
+}
 async function discordFetch(token,path,env){
   if(!["/users/@me","/users/@me/guilds","/users/@me/guilds/"+NARUTO_GUILD_ID+"/member"].includes(path))
     throw Error("Unapproved Discord API endpoint");
@@ -924,17 +953,9 @@ export default {
         if(path==="/mobile/discord2/api/channels"&&req.method==="GET"){
           const auth=await unseal(row.creds_encrypted,env);
           if(auth.expires<=now()+30000)return reply({state:"unauthorized",error:"Login Discord expirado. Entre novamente pelo Bushin."},401,headers);
-          const [member,guilds]=await Promise.all([
-            discordFetch(auth.access,"/users/@me/guilds/"+NARUTO_GUILD_ID+"/member",env),
-            discordFetch(auth.access,"/users/@me/guilds",env)
-          ]);
-          const guild=Array.isArray(guilds)?guilds.find(g=>String(g.id)===NARUTO_GUILD_ID):null;
-          const basePermissions=guild?.permissions??guild?.permissions_new;
-          if(!member||!Array.isArray(member.roles)||!/^[0-9]+$/.test(String(basePermissions??"")))
-            return reply({state:"unavailable",error:"Não consegui verificar cargos e permissões. Não vou exibir canais sem verificação."},503,headers);
-          const r=await personalListChannels(env,{...ctx,channelVisibility:{
-            memberId:row.user_id,roles:member.roles,basePermissions:String(basePermissions)
-          }});
+          const visibility=await discord2VerifiedVisibility(env,auth,row.user_id);
+          if(!visibility)return reply({state:"unavailable",error:"Não consegui verificar cargos e permissões. Não vou exibir canais sem verificação."},503,headers);
+          const r=await personalListChannels(env,{...ctx,channelVisibility:visibility});
           return reply(r,r.listed?200:503,headers);
         }
         const forumPostRoute=path.match(/^\/mobile\/discord2\/api\/forum\/([0-9]{15,22})\/posts$/);
@@ -956,17 +977,12 @@ export default {
         if(path==="/mobile/discord2/api/autoplay/authorized")return autoplayRoute(req,env,ctx,{reply,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/ai/chat-draft")return playerChatDraftRoute(req,env,ctx,{reply,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/autoplay")return playerRoute(req,env,ctx,{reply,baseUrl:base(env),seal,unseal,listChannels:async()=>{
-          // Read membership again after travel; the initial mobile session is not a role snapshot.
+          // Refresh verified guild roles at least once per 45 seconds.
           const auth=await unseal(row.creds_encrypted,env);
           if(auth.expires<=now()+30000)return {listed:false,reason:"Login Discord expirado. Entre novamente pelo Bushin."};
-          const [member,guilds]=await Promise.all([
-            discordFetch(auth.access,"/users/@me/guilds/"+NARUTO_GUILD_ID+"/member",env),
-            discordFetch(auth.access,"/users/@me/guilds",env)
-          ]);
-          const guild=Array.isArray(guilds)?guilds.find(g=>String(g.id)===NARUTO_GUILD_ID):null;
-          const permissions=guild?.permissions??guild?.permissions_new;
-          if(!Array.isArray(member?.roles)||!/^\d+$/.test(String(permissions??"")))return {listed:false,reason:"Não foi possível conferir os cargos atuais do Henrique."};
-          return personalListChannels(env,{...ctx,channelVisibility:{memberId:row.user_id,roles:member.roles,basePermissions:String(permissions)}});
+          const visibility=await discord2VerifiedVisibility(env,auth,row.user_id);
+          if(!visibility)return {listed:false,reason:"Não foi possível conferir os cargos atuais do Henrique."};
+          return personalListChannels(env,{...ctx,channelVisibility:visibility});
         }});
         if(path==="/mobile/discord2/api/game-room")return gameRoomRoute(req,env,ctx,{reply,baseUrl:base(env),plan:async channel_id=>{
           const result=await bushinAiNext(new Request(base(env)+"/mobile/discord2/api/ai/next",{
