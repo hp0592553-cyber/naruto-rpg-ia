@@ -31,6 +31,6 @@ test('temporarily failed status polling can recover while rate limits retain lon
  assert.match(AUTOPLAY_JS,/autoplayRetryMs\(e\)/);
  const server=readFileSync(new URL('../player-loop.mjs',import.meta.url),'utf8');
  assert.match(server,/discord_rate_limited|429/);
- assert.match(server,/\?60000:12000/);
+ assert.match(server,/\limited\?Date\.now\(\)\+wait\*1000:transient\?Date\.now\(\)\+12000:0/);
  assert.match(server,/Nada reenviado/);
 });

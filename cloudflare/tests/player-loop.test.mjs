@@ -24,7 +24,7 @@ test('player queues a correlated query, stop prevents further actions, unconfirm
  const helpers={reply:(v,s)=>Response.json(v,{status:s}),baseUrl,readChat:async()=>({read:true,messages:[]}),listChannels:async()=>({listed:true,visibility_filtered:true,channels:[{id:channel,name:'Comandos',type:0}]}),seal:async x=>x,unseal:async x=>x};
  const call=async data=>{let req=data?new Request(baseUrl+'/mobile/discord2/api/autoplay',{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify(data)}):new Request(baseUrl+'/mobile/discord2/api/autoplay');return (await playerRoute(req,env,ctx,helpers)).json()};
  let r=await call();r=await call({action:'start',revision:r.state.revision});
- r=await call({action:'tick',revision:r.state.revision});assert.equal(r.state.phase,'confirming');assert.equal(r.state.pending.action.command,'/perfil ver');
+ r=await call({action:'tick',revision:r.state.revision});assert.equal(r.state.phase,'confirming',JSON.stringify({reason:r.state.reason,brain:r.state.brain,code:r.state.code}));assert.equal(r.state.pending.action.command,'/perfil ver');
  const job=JSON.parse(rows.get('discord2_service_job_v1'));assert.equal(job.request_id,r.state.pending.id);
  r=await call({action:'stop',revision:r.state.revision});assert.equal(r.state.phase,'stopped');
  const revision=r.state.revision;r=await call({action:'tick',revision});assert.equal(r.state.revision,revision);assert.equal(r.state.steps,0);
