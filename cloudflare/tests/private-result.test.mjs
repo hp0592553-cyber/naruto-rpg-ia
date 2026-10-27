@@ -10,7 +10,7 @@ const origin='https://bushin-discord-direct.henrique-silva081106.workers.dev',ri
 async function fixture(patch={},title='Discord 2 '+rid){
  const pair=await crypto.subtle.generateKey({name:'RSASSA-PKCS1-v1_5',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},true,['sign','verify']);
  const jwk=await crypto.subtle.exportKey('jwk',pair.publicKey);jwk.kid='test';let writes=0;
- const claims={iss:'https://token.actions.githubusercontent.com',aud:origin+'/internal/discord2-result',repository:'hp0592553-cyber/naruto-rpg-ia',repository_id:'1429981222',repository_owner_id:'259182200',ref:'refs/heads/Projeto',event_name:'workflow_dispatch',workflow_ref:'hp0592553-cyber/naruto-rpg-ia/.github/workflows/opencode-projeto.yml@refs/heads/Projeto',exp:Date.now()/1000+300,iat:Date.now()/1000,run_id:'1',...patch};
+ const claims={iss:'https://token.actions.githubusercontent.com',aud:origin+'/internal/discord2-result',repository:'hp0592553-cyber/naruto-rpg-ia',repository_id:'1429981222',repository_owner_id:'259182200',ref:'refs/heads/Projeto',event_name:'workflow_dispatch',workflow_ref:'hp0592553-cyber/naruto-rpg-ia/.github/workflows/bushin-cloudflare-ci.yml@refs/heads/Projeto',exp:Date.now()/1000+300,iat:Date.now()/1000,run_id:'1',...patch};
  const b64=v=>Buffer.from(JSON.stringify(v)).toString('base64url'),data=b64({alg:'RS256',kid:'test'})+'.'+b64(claims);
  const sig=await crypto.subtle.sign('RSASSA-PKCS1-v1_5',pair.privateKey,new TextEncoder().encode(data));
  const token=data+'.'+Buffer.from(sig).toString('base64url');
