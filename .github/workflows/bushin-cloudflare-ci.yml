@@ -230,7 +230,7 @@ jobs:
           node-version: '22'
       - name: Instalar OpenCode para decidir ações do painel
         run: npm install --global opencode-ai@1.19.4
-      - name: Testar cliente persistente por até 5 minutos
+      - name: Testar cliente persistente por até 1 minuto
         env:
           DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
           RPG_MODEL: ${{ vars.RPG_MODEL || 'opencode/glm-5.3-flash-free' }}
