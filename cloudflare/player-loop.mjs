@@ -148,21 +148,21 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   if(saved.state.pending||saved.state.lease?.until>Date.now())return reply({error:'Existe uma operação pendente; confira o resultado antes de verificar outro canal.'},409,HEAD);
   const requested=String(data.channel_id||saved.state.context_channel_id||CHANNEL);
   if(!/^\d{15,22}$/.test(requested))return reply({error:'Canal inválido.'},400,HEAD);
-  const listed=await listChannels(env,ctx);
+  let listed;try{listed=await listChannels(env,ctx)}catch(e){return reply({error:'Não foi possível listar os canais agora.',reason:String(e?.message||'Falha de leitura').slice(0,150),code:'channel_list_failed'},503,HEAD)}
   if(!listed?.listed||listed.visibility_filtered!==true)return reply({error:listed?.reason||'Não foi possível validar os canais acessíveis agora.'},503,HEAD);
   const chosen=choosePlayerChannel({channels:listed.channels,selectedId:requested,previousId:saved.state.context_channel_id,location:saved.state.snapshot?.location});
   if(!chosen.channel_id)return reply({error:chosen.reason},409,HEAD);
-  const looked=await readChat(env,'bushin_naruto_personal_read',{channel_id:chosen.channel_id,limit:6},ctx);
+  let looked;try{looked=await readChat(env,'bushin_naruto_personal_read',{channel_id:chosen.channel_id,limit:6},ctx)}catch(e){return reply({error:'Não consegui ler o canal agora.',reason:String(e?.message||'Discord indisponível').slice(0,150),code:'channel_read_failed'},503,HEAD)}
   if(!looked?.read)return reply({error:looked?.reason||'O canal selecionado não confirmou leitura.',code:looked?.code||null,retry_after_seconds:looked?.retry_after_seconds||null},looked?.code===429?429:503,HEAD);
   const details={...chosen,requested_id:requested,checked_at:Date.now(),read_verified:true,read_messages:(looked.messages||[]).length};
-  const next=await update(d=>{
+  let next;try{next=await update(d=>{
    if(d.revision!==saved.state.revision)return null;
    d.channel_check=details;
    // No channel change during a running session, no messages or slash commands sent.
    if(!['running','waiting','confirming'].includes(d.phase)&&!d.pending)d.context_channel_id=chosen.channel_id;
    recordAutoplay(d,'channel_checked',chosen.channel_name);
    return d;
-  });
+  })}catch(e){return reply({error:'O estado do jogador não pôde ser salvo.',reason:String(e?.message||'Falha no banco').slice(0,150),code:'state_update_failed'},503,HEAD)}
   return reply(view(next.state),200,HEAD);
  }
  if(action==='stop'||action==='pause'){
@@ -381,5 +381,5 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   }
   const result=await service({action:'start',run_id:run,command_request:{command:selected.command,channel_id:selected.channel_id,options:selected.options||{}}});
   const next=await commit(d=>{d.plan_decision=null;d.context_channel_id=selected.channel_id;d.site_action={id:result.request_id,type:'channel',channel_id:selected.channel_id};d.refresh_menu=false;d.refresh_observation=false;if(selected.provider==='workers-ai'){d.brain={provider:'workers-ai',model:selected.model};d.workers_ai_error=null;d.workers_ai_retry_at=0}else if(selected.provider==='local-rules'){d.brain={provider:'local-rules',model:selected.model};if(workersAiError){d.workers_ai_error=workersAiError;d.workers_ai_retry_at=Date.now()+120000}}if(selected.component_key)d.completed_components=(d.completed_components||[]).concat(selected.component_key).slice(-100);d.pending={id:result.request_id,action:{label:selected.command,command:selected.command,channel_id:selected.channel_id,...(selected.arrival_check?{arrival_check:selected.arrival_check}:{})},stages:{requested:true,sent:false}};d.phase='confirming';d.reason='Executando '+selected.command;d.next_tick_at=Date.now()+2000;recordAutoplay(d,'requested',selected.command)});if(!next.changed){try{await service({action:'stop'})}catch{}}return reply(view(next.state),200,HEAD);
- }catch(e){const next=await commit(d=>{d.phase='blocked';d.code='player_paused';d.reason=String(e.message).slice(0,300);d.next_tick_at=0});return reply(view(next.state),200,HEAD)}
+ }catch(e){const message=String(e?.message||'Falha temporária').slice(0,260);const transient=/(temporarily unavailable|temporariamente indispon[ií]vel|Discord indispon[ií]vel|timeout|timed out|fetch failed|network|HTTP 5\d\d|429|rate.limit|Too Many Requests|connection reset)/i.test(message);const next=await commit(d=>{d.phase=transient?'waiting':'blocked';d.code=transient?'temporary_unavailable':'player_paused';d.reason=transient?'Discord ou executor indisponível: '+message+'. Nada reenviado; leitura será tentada após intervalo.':message;d.next_tick_at=transient?Date.now()+60000:0});return reply(view(next.state),200,HEAD)}
 }
