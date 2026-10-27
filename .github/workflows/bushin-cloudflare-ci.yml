@@ -79,7 +79,7 @@ jobs:
   deploy:
     name: Publicar somente com confirmacao manual
     needs: validate
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish == 'PUBLICAR' && github.ref == 'refs/heads/Projeto' }}
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/Projeto') || (github.event_name == 'workflow_dispatch' && inputs.publish == 'PUBLICAR' && github.ref == 'refs/heads/Projeto') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
