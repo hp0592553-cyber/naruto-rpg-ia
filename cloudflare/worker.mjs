@@ -240,7 +240,7 @@ async function discord2VerifiedVisibility(env,auth,userId){
       const cached=JSON.parse(saved.value_json);
       const v=cached.visibility;
       if(cached.until>Date.now()&&v?.memberId===ownerId&&Array.isArray(v.roles)&&
-        v.roles.every(id=>/^\\d{15,22}$/.test(String(id)))&&/^\\d+$/.test(String(v.basePermissions||'')))return v;
+        v.roles.every(id=>/^\d{15,22}$/.test(String(id)))&&/^\d+$/.test(String(v.basePermissions||'')))return v;
     }
   }catch{}
   const [member,guilds]=await Promise.all([
@@ -249,7 +249,7 @@ async function discord2VerifiedVisibility(env,auth,userId){
   ]);
   const guild=Array.isArray(guilds)?guilds.find(g=>String(g.id)===NARUTO_GUILD_ID):null;
   const permissions=guild?.permissions??guild?.permissions_new;
-  if(!Array.isArray(member?.roles)||!/^\\d+$/.test(String(permissions??'')))return null;
+  if(!Array.isArray(member?.roles)||!/^\d+$/.test(String(permissions??'')))return null;
   const visibility={memberId:ownerId,roles:member.roles,basePermissions:String(permissions)};
   try{
     await env.DB.prepare("INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at")
