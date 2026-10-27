@@ -39,15 +39,11 @@ export function fixMobileJs(js){
   const batch=document.createElement("button");batch.className="older";batch.textContent="↑ Carregar até 500 anteriores";batch.disabled=historyBatchRunning;batch.onclick=loadHistoryBatch;root.append(batch)}`);
  // A channel switch owns a new request even if the old channel is still loading.
  js=replaceOnce(js,'S.before=null;S.seq++;let c=','S.before=null;S.seq++;S.busy=false;forumBusy=false;let c=');
- js=replaceSection(js,'async function refresh(','async function send(',part=>{
+ js=replaceSection(js,'async function refresh(','async function older(){',part=>{
   part=replaceOnce(part,'?limit=12','?limit=50');
   part=replaceOnce(part,'const recent=(d.messages||[]).slice().reverse();','if(d.read!==true||!Array.isArray(d.messages))throw Error(d.reason||"A API não confirmou a leitura deste canal.");\n  const recent=d.messages.slice().reverse();');
   part=replaceOnce(part,'}catch(e){if(!quiet&&!e.rateLimited)', '}catch(e){if(seq!==S.seq||channel!==S.current)return;if(!quiet&&!e.rateLimited)');
-  part=replaceOnce(part,'finally{S.busy=false}', 'finally{if(seq===S.seq&&channel===S.current)S.busy=false}');
-  part=replaceOnce(part,'S.busy=true;const id=S.current,feed=', 'S.busy=true;const id=S.current,seq=++S.seq,feed=');
-  part=replaceOnce(part,'if(id!==S.current)return;', 'if(id!==S.current||seq!==S.seq)return;\n  if(d.read!==true||!Array.isArray(d.messages))throw Error(d.reason||"Histórico não confirmado.");');
-  part=replaceOnce(part,'}catch(e){status(', '}catch(e){if(id!==S.current||seq!==S.seq)return;status(');
-  return replaceOnce(part,'finally{S.busy=false}', 'finally{if(id===S.current&&seq===S.seq)S.busy=false}');
+  return replaceOnce(part,'finally{S.busy=false}', 'finally{if(seq===S.seq&&channel===S.current)S.busy=false}');
  });
  // Increase history pages from 12 to 50; retain the cursor and prevent out-of-order channel mixing.
  js=replaceSection(js,'async function older(){','async function send(){',part=>{
