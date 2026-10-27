@@ -869,12 +869,12 @@ async function receivePrivateCommandResult(req,env){
   const header=JSON.parse(dec.decode(bytesFrom64(parts[0]))),claims=JSON.parse(dec.decode(bytesFrom64(parts[1])));
   const current=Math.floor(Date.now()/1000),repo="hp0592553-cyber/naruto-rpg-ia";
   const principal=repo+"/.github/workflows/bushin-cloudflare-ci.yml@refs/heads/Projeto";
-  const diagnostic=claims.workflow_ref===repo+"/.github/workflows/discord2-relay-check.yml@refs/heads/Projeto";
+  
   if(header.alg!=="RS256"||claims.iss!=="https://token.actions.githubusercontent.com"||
      claims.aud!==base(env)+"/internal/discord2-result"||claims.repository!==repo||
      String(claims.repository_id)!=="1429981222"||String(claims.repository_owner_id)!=="259182200"||
-     claims.ref!=="refs/heads/Projeto"||(diagnostic?claims.event_name!=="push":claims.event_name!=="workflow_dispatch")||
-     (!diagnostic&&claims.workflow_ref!==principal)||
+     claims.ref!=="refs/heads/Projeto"||claims.event_name!=="workflow_dispatch"||
+     claims.workflow_ref!==principal||
      !Number.isFinite(claims.exp)||claims.exp<=current||claims.nbf>current+30||
      !Number.isFinite(claims.iat)||claims.iat<current-900||claims.iat>current+30)return fail(401);
   stage="signing_keys";

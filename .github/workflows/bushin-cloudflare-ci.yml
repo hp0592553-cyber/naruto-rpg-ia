@@ -1,5 +1,5 @@
 name: Bushin - Cloudflare CI e deploy controlado
-run-name: ${{ inputs.mode == 'servico' && 'Bushin command session' || inputs.mode == 'comando' && format('Discord 2 {0}', inputs.request_id) || 'Bushin CI · HTML · Worker · Cloudflare' }}
+run-name: ${{ inputs.mode == 'servico' && 'Bushin command session' || inputs.mode == 'comando' && format('Discord 2 {0}', inputs.request_id) || 'Bushin - Cloudflare CI e deploy controlado' }}
 
 on:
   workflow_dispatch:
@@ -66,6 +66,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Confirmar o unico workflow principal do Bushin
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          if os.getenv('GITHUB_REF') == 'refs/heads/Projeto' or os.getenv('GITHUB_BASE_REF') == 'Projeto':
+              files = {p.name for p in Path('.github/workflows').iterdir() if p.suffix in {'.yml', '.yaml'}}
+              expected = {'bushin-cloudflare-ci.yml', 'release.yml', 'test.yml'}
+              duplicates = sorted(files - expected)
+              assert not duplicates, 'Workflows Bushin duplicados: ' + ', '.join(duplicates)
+              assert 'bushin-cloudflare-ci.yml' in files
+              print('Bushin unificado no workflow principal; release/test genéricos preservados.')
+          PY
       - name: Verificar sintaxe de todos os modulos Cloudflare
         run: |
           set -eu
