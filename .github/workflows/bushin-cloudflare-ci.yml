@@ -46,6 +46,8 @@ jobs:
           for file in cloudflare/*.mjs; do node --check "$file"; done
       - name: Verificar bindings, imports, interface e seguranca do projeto
         run: node scripts/verify-bushin-ci.mjs
+      - name: Testar comportamento do Bushin com mocks (sem Discord real)
+        run: node --test cloudflare/tests/*.test.mjs
       - name: Exportar HTML real do Discord 2
         run: node scripts/export-discord2-html.mjs dist/discord2
       - name: Verificar JavaScript exportado
