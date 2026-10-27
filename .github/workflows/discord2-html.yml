@@ -1,0 +1,66 @@
+name: Discord 2 HTML - build e validacao
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [Projeto]
+    paths:
+      - 'cloudflare/**'
+      - 'scripts/export-discord2-html.mjs'
+      - '.github/workflows/discord2-html.yml'
+  pull_request:
+    paths:
+      - 'cloudflare/**'
+      - 'scripts/export-discord2-html.mjs'
+      - '.github/workflows/discord2-html.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discord2-html-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout da branch
+        uses: actions/checkout@v4
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validar sintaxe dos modulos do painel
+        run: |
+          node --check cloudflare/discord2-ui.mjs
+          node --check cloudflare/mobile-panel-fixes.mjs
+          node --check cloudflare/autoplay-ui.mjs
+          node --check cloudflare/player-loop.mjs
+          node --check cloudflare/player-channel.mjs
+      - name: Extrair HTML e JavaScript do Discord 2
+        run: node scripts/export-discord2-html.mjs dist/discord2
+      - name: Validar JavaScript exportado
+        run: node --check dist/discord2/app.js
+      - name: Conferir arquivos e HTML
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          html=Path('dist/discord2/index.html').read_text()
+          js=Path('dist/discord2/app.js').read_text()
+          assert '<!doctype html>' in html.lower()
+          assert '<script defer src="./app.js"></script>' in html
+          assert 'id="discordComposer"' in html
+          assert 'id="gamePanel"' in html
+          assert len(js)>1000
+          print(f'OK: HTML {len(html)} chars; JS {len(js)} chars')
+          PY
+      - name: Publicar HTML gerado como artefato do Actions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: discord2-html
+          path: dist/discord2/
+          if-no-files-found: warn
+          retention-days: 7
