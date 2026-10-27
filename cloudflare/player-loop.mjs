@@ -193,11 +193,19 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   return reply(view(next.state),200,HEAD);
  }
  if(action==='check_channel'){
-  if(saved.state.lease?.until>Date.now())return reply({error:'A verificação aguardará uma operação em andamento. Nenhuma mensagem foi enviada.'},409,HEAD);
+  if(/429|rate.limit/i.test(String(saved.state.code||'')+' '+String(saved.state.reason||''))&&saved.state.next_tick_at>Date.now()){
+   const wait=Math.max(1,Math.ceil((saved.state.next_tick_at-Date.now())/1000));
+   return reply({error:'Discord em espera por limite 429. Aguarde '+wait+' segundos; nenhuma requisição será enviada.',code:'discord_rate_limited',retry_after_seconds:wait},429,{...HEAD,'retry-after':String(wait)});
+  }
+  if(saved.state.lease?.until>Date.now())return reply({error:'A verificação aguardará uma operação em andamento. Nenhuma mensagem foi enviada.',code:'operation_in_progress'},409,HEAD);
   const requested=String(data.channel_id||saved.state.context_channel_id||CHANNEL);
   if(!/^\d{15,22}$/.test(requested))return reply({error:'Canal inválido.'},400,HEAD);
-  let listed;try{listed=await listChannels(env,ctx)}catch(e){return reply({error:'Não foi possível listar os canais agora.',reason:String(e?.message||'Falha de leitura').slice(0,150),code:'channel_list_failed'},503,HEAD)}
-  if(!listed?.listed||listed.visibility_filtered!==true)return reply({error:listed?.reason||'Não foi possível validar os canais acessíveis agora.'},503,HEAD);
+  let listed;try{listed=await listChannels(env,ctx)}catch(e){
+   const detail=String(e?.message||'Falha de leitura').slice(0,220),wait=Math.max(1,Math.min(900,Number(detail.match(/Aguarde\s+(\d+)\s+segundos/i)?.[1])||60));
+   const limited=e?.status===429||/429|rate.limit/i.test(detail);
+   return reply({error:limited?detail:'Não foi possível listar os canais agora.',reason:detail,code:limited?'discord_rate_limited':'channel_list_failed',...(limited?{retry_after_seconds:wait}:{})},limited?429:503,{...HEAD,...(limited?{'retry-after':String(wait)}:{})});
+  }
+  if(!listed?.listed||listed.visibility_filtered!==true)return reply({error:listed?.reason||'Não foi possível validar os canais acessíveis agora.',code:listed?.code===429?'discord_rate_limited':'channel_list_failed',retry_after_seconds:listed?.retry_after_seconds||null},listed?.code===429?429:503,HEAD);
   const accessible=readableChannels(listed.channels).find(c=>c.id===requested);
   if(!accessible||['reference','social'].includes(channelKind(accessible)))return reply({error:'Escolha um canal de RPG acessível. A IA não vai trocar para outro automaticamente.'},409,HEAD);
   const chosen={...choosePlayerChannel({channels:listed.channels,selectedId:requested,previousId:null,location:null}),channel_id:requested,channel_name:accessible.name,source:'manual',location_confirmed:false,reason:'Este canal foi escolhido manualmente e confirmado por leitura. Sem navegação automática.'};
@@ -428,5 +436,19 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   }
   const result=await service({action:'start',run_id:run,command_request:{command:selected.command,channel_id:selected.channel_id,options:selected.options||{}}});
   const next=await commit(d=>{d.plan_decision=null;d.context_channel_id=contextChannel;d.site_action=null;d.refresh_menu=false;d.refresh_observation=false;if(selected.provider==='workers-ai'){d.brain={provider:'workers-ai',model:selected.model};d.workers_ai_error=null;d.workers_ai_retry_at=0}else if(selected.provider==='local-rules'){d.brain={provider:'local-rules',model:selected.model};if(workersAiError){d.workers_ai_error=workersAiError;d.workers_ai_retry_at=Date.now()+120000}}if(selected.component_key)d.completed_components=(d.completed_components||[]).concat(selected.component_key).slice(-100);d.pending={id:result.request_id,action:{label:selected.command,command:selected.command,channel_id:selected.channel_id,...(selected.arrival_check?{arrival_check:selected.arrival_check}:{})},stages:{requested:true,sent:false}};d.phase='confirming';d.reason='Executando '+selected.command;d.next_tick_at=Date.now()+2000;recordAutoplay(d,'requested',selected.command)});if(!next.changed){try{await service({action:'stop'})}catch{}}return reply(view(next.state),200,HEAD);
- }catch(e){const message=String(e?.message||'Falha temporária').slice(0,260);const transient=/(temporarily unavailable|temporariamente indispon[ií]vel|Discord indispon[ií]vel|timeout|timed out|fetch failed|network|HTTP 5\d\d|429|rate.limit|Too Many Requests|connection reset)/i.test(message);const next=await commit(d=>{d.phase=transient?'waiting':'blocked';d.code=transient?'temporary_unavailable':'player_paused';d.reason=transient?'Discord ou executor indisponível: '+message+' Nada reenviado; nova leitura agendada automaticamente.':message;d.next_tick_at=transient?Date.now()+(/429|rate.limit|Too Many Requests/i.test(message)?Math.max(60000,Math.min(900000,(Number(message.match(/Aguarde\s+(\d+)\s+segundos/i)?.[1])||60)*1000)):12000):0;recordAutoplay(d,'error',(transient?'retry_scheduled':'blocked')+' · '+message);return d});return reply(view(next.state),200,HEAD)}
+ }catch(e){
+  const message=String(e?.message||'Falha temporária').slice(0,260);
+  const limited=e?.status===429||/HTTP 429|Discord em pausa por 429|Discord em espera OAuth|rate.limit|Too Many Requests/i.test(message);
+  const transient=limited||/(temporarily unavailable|temporariamente indispon[ií]vel|Discord indispon[ií]vel|timeout|timed out|fetch failed|network|HTTP 5\d\d|connection reset)/i.test(message);
+  const wait=limited?Math.max(1,Math.min(900,Number(message.match(/Aguarde\s+(\d+)\s+segundos/i)?.[1])||Number(message.match(/429:\s*(\d+)\s+segundos/i)?.[1])||60)):0;
+  const next=await commit(d=>{
+   d.phase=transient?'waiting':'blocked';
+   d.code=limited?'discord_rate_limited':transient?'temporary_unavailable':'player_paused';
+   d.reason=limited?message+' Nenhuma requisição ou comando repetido até terminar a espera.':transient?'Discord ou executor indisponível: '+message+' Nada reenviado; nova leitura agendada automaticamente.':message;
+   d.next_tick_at=limited?Date.now()+wait*1000:transient?Date.now()+12000:0;
+   recordAutoplay(d,'error',(limited?'discord_rate_limited · '+wait+'s':transient?'retry_scheduled':'blocked')+' · '+message);
+   return d;
+  });
+  return reply(view(next.state),200,HEAD);
+ }
 }
