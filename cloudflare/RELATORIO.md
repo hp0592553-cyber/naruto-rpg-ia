@@ -49,3 +49,11 @@ Referências: https://docs.discord.com/developers/components/reference ; https:/
 - O cartão mostra análise, opção recomendada do conjunto de opções ativas e até três próximos passos condicionais. Não clica automaticamente nem inventa XP, atributos extraídos de imagens ou progressão.
 - Testes de segurança e interface foram adicionados em `cloudflare/tests/option-cards.test.mjs` e passaram no CI: https://github.com/hp0592553-cyber/naruto-rpg-ia/actions/runs/40579279049
 - Os dados de imagens de atributos ainda exigem confirmação textual ou extração confiável separada. O executor contínuo continua sujeito à conexão e autorização disponíveis, sem reenvio automático de comandos não confirmados.
+
+## 27/10/2026 — diagnóstico da sessão temporária no Android
+
+- A tela mostrou `Executor desconectado` apesar do último resultado privado ter sido recebido. Isto não confirma uma falha da IA: o script atual `scripts/command_service.py` define explicitamente `deadline=60` segundos para uma execução via GitHub Actions.
+- Confirmado nos logs do GitHub: `Command service connected` e encerramento aproximadamente 60 segundos depois. O texto anterior que prometia uma sessão de 25 minutos estava incorreto; foi corrigido.
+- A interface agora identifica o executor offline, separa análise da IA de envio de slash e reduz a espera do envio de comando. O texto de slash permanece no compositor se não houver confirmação de aceitação; não é enviado como mensagem comum.
+- Para sequência real e longa do RPG será necessária uma integração persistente e autorizada, não um runner de testes temporário. Esta atualização não afirma que houve execução ou XP ganho.
+- Validação do CI: https://github.com/hp0592553-cyber/naruto-rpg-ia/actions/runs/40585452966
