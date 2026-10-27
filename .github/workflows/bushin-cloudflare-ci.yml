@@ -1,0 +1,43 @@
+# Registro exigido pelo GitHub Actions na branch padrao (main).
+# O workflow de verdade, testes, executor e deploy estao na branch Projeto
+# no MESMO caminho .github/workflows/bushin-cloudflare-ci.yml.
+# Nao execute a partir de main: selecione Projeto no menu Run workflow.
+name: Bushin - Cloudflare CI e deploy controlado
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Selecione Projeto: ci, diagnostico, jogar, comando, servico, login ou relay'
+        required: true
+        default: ci
+        type: choice
+        options: [ci, diagnostico, jogar, comando, servico, login, relay]
+      request_id:
+        description: 'ID do pedido correlacionado do Discord 2'
+        required: false
+        type: string
+        default: ''
+      command_json:
+        description: 'Comando verificado; somente em mode=comando'
+        required: false
+        type: string
+        default: ''
+      publish:
+        description: 'Para publicar na branch Projeto: PUBLICAR'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  default-branch-notice:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: A execucao real do Bushin e na branch Projeto
+        run: |
+          echo '::error::Selecione a branch Projeto no menu Run workflow. A main apenas registra o workflow para liberar o botao no GitHub.'
+          exit 1
