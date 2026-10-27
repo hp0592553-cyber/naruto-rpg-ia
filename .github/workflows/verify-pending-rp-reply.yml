@@ -20,4 +20,4 @@ jobs:
           node --check cloudflare/player-context.mjs
           node --check cloudflare/autoplay-ui.mjs
       - name: Run focused tests
-        run: timeout 120s node --test cloudflare/tests/player-pending-rp.test.mjs cloudflare/tests/history-ai-draft.test.mjs cloudflare/tests/player-channel.test.mjs
+        run: timeout 120s node --test cloudflare/tests/player-pending-rp.test.mjs cloudflare/tests/history-ai-draft.test.mjs cloudflare/tests/player-channel.test.mjs cloudflare/tests/player-loop.test.mjs
