@@ -62,7 +62,7 @@ function renderAutoplay(data){
   '📍 Canal verificado: '+channel.channel_name+' ('+channel.channel_id+'). '+channel.reason+' Comandos: '+(channel.command_channel_name||channel.command_channel_id||'não confirmado')+'. Mensagens lidas: '+(channel.read_messages??'?')+'.'
   :'📍 Canal selecionado: '+activeName+'. Ainda sem verificação de leitura nesta sessão. Toque em Conferir canal.';
  E("autoplayStats").textContent="Nível: "+scalar("level")+" · XP: "+scalar("xp")+" · Vida: "+resource("hp")+" · Chakra: "+resource("chakra")+" · Energia: "+resource("energy")+"\nMissão: "+(snapshot?.mission?.label||snapshot?.mission?.status||"não confirmada")+" · Local: "+(snapshot?.location||"não confirmado");
- E("autoplayAction").textContent=s.pending?"Ação atual: "+s.pending.action.label+" · Canal "+s.pending.action.channel_id+" · ID "+s.pending.id:"Etapa: "+(s.cycle_stage||s.phase)+" · Ações confirmadas nesta ativação: "+(s.steps||0)+" / "+s.max_steps;
+ E("autoplayAction").textContent=s.pending?"⏳ Ação anterior pendente: "+s.pending.action.label+" · Canal "+s.pending.action.channel_id+" · ID "+s.pending.id+". Use Conferir antes de começar outra.":"Etapa: "+(s.cycle_stage||s.phase)+" · Ações confirmadas nesta ativação: "+(s.steps||0)+" / "+s.max_steps;
  const operation=s.pending||s.last_operation,st=operation?.stages;
  const yes=v=>v===true?"sim":v===false?"não":"incerto / aguardando";
  E("autoplayStages").textContent=st?"Solicitada: "+yes(st.requested)+" · Tentativa de envio: "+yes(st.send_attempted)+" · Recebida pela integração: "+yes(st.sent)+" · Executada pelo jogo: "+yes(st.executed)+" · Resposta capturada: "+yes(st.response_captured)+" · Estado confirmado: "+yes(st.game_state_confirmed)+" · XP/nível aumentou: "+yes(st.progress_confirmed):"Nenhuma ação enviada nesta sessão do agente.";
@@ -87,7 +87,7 @@ function renderAutoplay(data){
  E("autoplayStart").disabled=autoplayControlBusy||autoplayStopBusy||active;E("autoplayResume").disabled=autoplayControlBusy||autoplayStopBusy||active||!s.run_id;
  E("autoplayPause").disabled=autoplayControlBusy||["stopped","paused"].includes(s.phase);E("autoplayStop").disabled=autoplayStopBusy||(s.phase==="stopped"&&!autoplayControlBusy);
  E("autoplayReview").disabled=autoplayControlBusy||!s.pending;
- E("autoplayChannelCheck").disabled=autoplayControlBusy||autoplayStopBusy||!!s.pending;
+ E("autoplayChannelCheck").disabled=autoplayControlBusy||autoplayStopBusy||!!s.lease?.until&&s.lease.until>Date.now();
 }
 async function refreshAutoplay(){
  try{const data=await req("/autoplay");renderAutoplay(data);return data;}
@@ -109,6 +109,13 @@ async function controlAutoplay(action,goal){
   let current=await refreshAutoplay();if(!current)throw Error("Estado indisponível");
   if(["start","resume"].includes(action)){
    if(!S.current)throw Error("Selecione primeiro um canal do Naruto Project.");
+   // A previous operation is reconciled before selecting a new channel or action.
+   if(current.state.pending){
+    E("autoplayStatus").textContent="Conferindo operação anterior pelo ID, sem repetir o comando…";
+    current=await req("/autoplay",{method:"POST",body:JSON.stringify({action:"review",revision:current.state.revision})});
+    renderAutoplay(current);
+    if(current.state.pending)throw Error("A operação anterior "+(current.state.pending.action?.label||"do RPG")+" ainda aguarda confirmação. Toque em Conferir; nenhum comando novo foi enviado.");
+   }
    const checked=current.state.channel_check;
    if(checked?.read_verified!==true||checked.requested_id!==S.current||Date.now()-Number(checked.checked_at||0)>120000){
     current=await req("/autoplay",{method:"POST",body:JSON.stringify({action:"check_channel",revision:current.state.revision,channel_id:S.current})});
