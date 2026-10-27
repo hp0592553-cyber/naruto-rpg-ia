@@ -127,7 +127,25 @@ export async function workersAiPlan(env,{available=[],observations=[],uncertain=
  catch(e){return {error:String(e?.message||'model_failed').slice(0,80)}}
  finally{clearTimeout(timer)}
  let choice;try{choice=JSON.parse(String(result?.response||''))}catch{return {error:'invalid_json'}}
- const command=typeof choice.command==='string'?choice.command.trim():'';
+ // A model may invent a slash command despite a verified catalog. Retry once
+ // with the exact allowlist; never execute a guessed or unverified command.
+ let command=typeof choice.command==='string'?choice.command.trim():'';
+ if(command&&command!=='/component'&&!usable.some(c=>c.command===command)){
+  const allowed=usable.map(c=>c.command);
+  try{
+   const correction=await Promise.race([
+    env.BUSHIN_AI.run(WORKERS_AI,{messages:[
+     {role:'system',content:'O comando anterior nao pertence ao catalogo verificado. Escolha EXATAMENTE um dos comandos permitidos, com options {} e o channel_id correspondente. Se nenhum servir, retorne command vazio. Nao invente comandos. Responda somente JSON.'},
+     {role:'user',content:JSON.stringify({invalid_command:command,allowed_commands:usable.map(c=>({command:c.command,channel_id:c.verified_channel})),goal:input.goal,observations:input.observations})}
+    ],max_tokens:220,temperature:0,response_format:{type:'json_object'}}),
+    new Promise((_,reject)=>setTimeout(()=>reject(Error('model_retry_timeout')),8000))
+   ]);
+   const corrected=JSON.parse(String(correction?.response||''));
+   if(corrected&&typeof corrected.command==='string'&&allowed.includes(corrected.command.trim())){
+    choice=corrected;command=corrected.command.trim();
+   }
+  }catch{}
+ }
  if(!command)return {error:'no_action',reason:String(choice.reason||'').slice(0,200)};
  const options=choice.options&&typeof choice.options==='object'&&!Array.isArray(choice.options)?choice.options:{};
  if(command==='/component'){
@@ -305,7 +323,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   const baseline=(await readAutoplay(env,owner)).state;
   // A stop arriving during session setup must win over this older start.
   if(baseline.revision!==startRevision)return reply(view(baseline),200,HEAD);
-  const next=await update(d=>{if(d.revision!==baseline.revision)return null;if(refreshPlanner)d.required_planner_revision='server-v5';const verified=d.channel_check?.read_verified===true&&Date.now()-Number(d.channel_check.checked_at||0)<300000&&d.channel_check.requested_id===String(data.channel_id||'');d.context_channel_id=String(data.channel_id||d.context_channel_id||CHANNEL);d.site_action=null;d.chat_started_at=Date.now();d.goal=String(data.goal||d.goal||'Jogar Naruto Project até o nível 20.').slice(0,500);d.plan_pending=null;d.plan_decision=null;d.plan_stale=false;d.lease=null;d.phase=online?'running':'waiting';d.reason=online?'Lendo sua ficha e o estado do jogo.':'Conectando o executor. Nenhuma ação enviada ainda.';d.code=null;d.run_id=crypto.randomUUID();d.steps=0;if(!d.player_observations?.length){d.completed_keys=[];d.player_observations=[];}d.next_tick_at=Date.now()+1000;return d});return reply(view(next.state),200,HEAD);
+  const next=await update(d=>{if(d.revision!==baseline.revision)return null;if(refreshPlanner)d.required_planner_revision='server-v5';const verified=d.channel_check?.read_verified===true&&Date.now()-Number(d.channel_check.checked_at||0)<300000&&d.channel_check.requested_id===String(data.channel_id||'');d.context_channel_id=String(data.channel_id||((d.channel_check?.read_verified===true&&Date.now()-Number(d.channel_check.checked_at||0)<300000)?d.channel_check.requested_id:null)||d.context_channel_id||CHANNEL);d.site_action=null;d.chat_started_at=Date.now();d.goal=String(data.goal||d.goal||'Jogar Naruto Project até o nível 20.').slice(0,500);d.plan_pending=null;d.plan_decision=null;d.plan_stale=false;d.lease=null;d.phase=online?'running':'waiting';d.reason=online?'Lendo sua ficha e o estado do jogo.':'Conectando o executor. Nenhuma ação enviada ainda.';d.code=null;d.run_id=crypto.randomUUID();d.steps=0;if(!d.player_observations?.length){d.completed_keys=[];d.player_observations=[];}d.next_tick_at=Date.now()+1000;return d});return reply(view(next.state),200,HEAD);
  }
  if(!['running','waiting','confirming'].includes(saved.state.phase))return reply(view(saved.state),200,HEAD);
  if(saved.state.lease&&saved.state.lease.until>Date.now())return reply(view(saved.state),200,HEAD);
