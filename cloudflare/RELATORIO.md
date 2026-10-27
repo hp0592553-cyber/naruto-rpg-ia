@@ -41,3 +41,11 @@ Referências: https://docs.discord.com/developers/components/reference ; https:/
 - CI aprovado na branch `Projeto`: https://github.com/hp0592553-cyber/naruto-rpg-ia/actions/runs/40559143264
 - Esta publicação não comprova conexão online com Discord nem execução de comandos do RPG. A última sessão do executor falhou em `Discord connection unavailable; nothing sent`; exige diagnóstico separado, sem repetir envio e sem expor token.
 - Deploy controlado pelo único YAML principal, preservando bindings e Secrets existentes.
+
+## Caixinhas contextuais da IA (27/10/2026)
+
+- Discord 2 agora tem cartões inline para analisar opções dos controles de mensagens reais do Naruto Bot, incluindo mensagens privadas e Components V2.
+- A análise é feita pelo Llama Workers AI somente após conferir a mensagem real e seu vínculo com a conta autorizada. Caixas de outros bots (exemplo: DISBOARD) não viram ações do Naruto RPG.
+- O cartão mostra análise, opção recomendada do conjunto de opções ativas e até três próximos passos condicionais. Não clica automaticamente nem inventa XP, atributos extraídos de imagens ou progressão.
+- Testes de segurança e interface foram adicionados em `cloudflare/tests/option-cards.test.mjs` e passaram no CI: https://github.com/hp0592553-cyber/naruto-rpg-ia/actions/runs/40579279049
+- Os dados de imagens de atributos ainda exigem confirmação textual ou extração confiável separada. O executor contínuo continua sujeito à conexão e autorização disponíveis, sem reenvio automático de comandos não confirmados.
