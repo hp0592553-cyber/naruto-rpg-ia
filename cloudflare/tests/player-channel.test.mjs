@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {channelText,channelKind,readableChannels,choosePlayerChannel,planningChannels,expectedActionChannel} from '../player-channel.mjs';
 import {playerRoute,rulePlan,workersAiPlan} from '../player-loop.mjs';
 import {AUTOPLAY_HTML,AUTOPLAY_JS} from '../autoplay-ui.mjs';
+import {PANEL_JS} from '../discord2-ui.mjs';
 
 const ID='481485837801095178',COMMANDS='1520114348079583263',FIELD='1522249926845923339',FOREST='1512345678912345678',RULES='1532489544161562857',CHATS='1520114256740352061';
 const channels=[
@@ -53,10 +54,10 @@ test('Llama proposal is rejected when it tries /perfil ver inside scene channel'
  const result=await workersAiPlan(env,{available:[{command:'/perfil ver',options:[]}],channels,contextChannel:FIELD});
  assert.equal(result.error,'wrong_command_channel');
 });
-function fixture({visible=true,read=true}={}){
+function fixture({visible=true,read=true,channelError=false,readError=false}={}){
  const data=new Map(),env={BUSHIN_OWNER_DISCORD_ID:ID,DISCORD_USER_TOKEN:'synthetic-never-real-credential-value-for-test-123456789',DB:{prepare(sql){let bound=[];return {bind(...v){bound=v;return this},async first(){return data.has(bound[1])?{value_json:data.get(bound[1])}:null},async run(){let changed=0;if(sql.startsWith('UPDATE')){if(data.get(bound[3])===bound[4]){data.set(bound[3],bound[0]);changed=1}}else if(!data.has(bound[1])){data.set(bound[1],bound[2]);changed=1}return {meta:{changes:changed}}}}}}};
  const ctx={me:{id:ID,membership:{member:true}}};let reads=0;
- const helpers={reply:(x,status)=>Response.json(x,{status}),baseUrl:'https://example.test',listChannels:async()=>({listed:true,visibility_filtered:visible,channels}),readChat:async(_env,name,args)=>{reads++;assert.equal(name,'bushin_naruto_personal_read');assert.equal(args.limit,6);return read?{read:true,messages:[{id:'1564000000000000000',author_id:ID}]}:{read:false,code:403,reason:'Não autorizado'};}};
+ const helpers={reply:(x,status)=>Response.json(x,{status}),baseUrl:'https://example.test',listChannels:async()=>{if(channelError)throw Error('Discord temporarily unavailable.');return {listed:true,visibility_filtered:visible,channels}},readChat:async(_env,name,args)=>{reads++;if(readError)throw Error('Read timeout');assert.equal(name,'bushin_naruto_personal_read');assert.equal(args.limit,6);return read?{read:true,messages:[{id:'1564000000000000000',author_id:ID}]}:{read:false,code:403,reason:'Não autorizado'};}};
  const post=async action=>{const r=await playerRoute(new Request('https://example.test/mobile/discord2/api/autoplay',{method:'POST',headers:{origin:'https://example.test','content-type':'application/json'},body:JSON.stringify({action,revision:0,channel_id:FIELD})}),env,ctx,helpers);return {status:r.status,data:await r.json()}};
  return {post,getReads:()=>reads};
 }
@@ -77,4 +78,15 @@ test('Android player displays the checked channel and checks before starting',()
  assert.match(AUTOPLAY_HTML,/autoplayChannelCheck/);
  assert.match(AUTOPLAY_JS,/action:"check_channel"/);
  assert.match(AUTOPLAY_JS,/channel\?\.read_verified/);
+});
+
+test('channel check catches upstream 500-style errors and returns safe 503 JSON without sending',async()=>{
+ const channelsFail=await fixture({channelError:true}).post('check_channel');
+ assert.equal(channelsFail.status,503);assert.equal(channelsFail.data.code,'channel_list_failed');
+ const readFail=await fixture({readError:true}).post('check_channel');
+ assert.equal(readFail.status,503);assert.equal(readFail.data.code,'channel_read_failed');
+});
+test('Android UI displays underlying server error rather than only a generic API 500',()=>{
+ assert.match(PANEL_JS,/d\.error_description/);
+ assert.match(PANEL_JS,/HTTP/);
 });
