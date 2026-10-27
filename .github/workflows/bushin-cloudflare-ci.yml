@@ -1,8 +1,25 @@
 name: Bushin - Cloudflare CI e deploy controlado
+run-name: ${{ inputs.mode == 'servico' && 'Bushin command session' || inputs.mode == 'comando' && format('Discord 2 {0}', inputs.request_id) || 'Bushin CI · HTML · Worker · Cloudflare' }}
 
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'ci (testes), diagnostico, jogar, comando, servico, login ou relay'
+        required: true
+        default: ci
+        type: choice
+        options: [ci, diagnostico, jogar, comando, servico, login, relay]
+      request_id:
+        description: 'ID do pedido correlacionado do Discord 2'
+        required: false
+        type: string
+        default: ''
+      command_json:
+        description: 'Comando ja verificado pelo painel; usado somente em modo comando'
+        required: false
+        type: string
+        default: ''
       publish:
         description: 'Para publicar, digite PUBLICAR; deixe vazio para apenas testar'
         required: false
@@ -26,11 +43,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: bushin-cloudflare-${{ github.ref }}
+  group: bushin-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'ci' }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   validate:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode == 'ci' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -53,8 +71,29 @@ jobs:
           mkdir -p dist/diagnostics
           node --test --test-reporter=tap cloudflare/tests/*.test.mjs > dist/diagnostics/unit-tests.tap 2>&1 || { tail -n 100 dist/diagnostics/unit-tests.tap; exit 1; }
           tail -n 30 dist/diagnostics/unit-tests.tap
+      - name: Testar Jogar por mim, Parar e roteamento sem Discord real
+        run: |
+          node --test cloudflare/tests/site-controls.test.mjs cloudflare/tests/player-loop.test.mjs cloudflare/tests/player-channel.test.mjs
+      - name: Validar scripts do executor e ponte Codex
+        run: |
+          python3 -m py_compile scripts/codex_bridge.py scripts/command_service.py scripts/naruto_guarded_mcp.py scripts/opencode_planner.py
+          python3 -m unittest discover -s scripts -p 'test_command_service.py'
+          python3 -m unittest discover -s tests -p 'test_opencode_planner.py'
       - name: Exportar HTML real do Discord 2
         run: node scripts/export-discord2-html.mjs dist/discord2
+      - name: Conferir HTML e composicao do painel
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          html=Path('dist/discord2/index.html').read_text()
+          js=Path('dist/discord2/app.js').read_text()
+          assert '<!doctype html>' in html.lower()
+          assert '<script defer src="./app.js"></script>' in html
+          assert 'id="discordComposer"' in html
+          assert 'id="gamePanel"' in html
+          assert len(js)>1000
+          print(f'OK: HTML {len(html)} caracteres; JS {len(js)} caracteres')
+          PY
       - name: Verificar JavaScript exportado
         run: node --check dist/discord2/app.js
       - name: Compilar Worker em modo dry-run (sem publicar)
@@ -77,9 +116,9 @@ jobs:
           exit 1
 
   deploy:
-    name: Publicar somente com confirmacao manual
+    name: Publicar somente apos validacao completa
     needs: validate
-    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/Projeto') || (github.event_name == 'workflow_dispatch' && inputs.publish == 'PUBLICAR' && github.ref == 'refs/heads/Projeto') }}
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/Projeto') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'ci' && inputs.publish == 'PUBLICAR' && github.ref == 'refs/heads/Projeto') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -103,3 +142,267 @@ jobs:
             --output /dev/null \
             --write-out 'Discord 2 HTTP %{http_code}\n' \
             'https://bushin-discord-direct.henrique-silva081106.workers.dev/mobile/discord2'
+
+
+  servico:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/Projeto' && inputs.mode == 'servico'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: Projeto
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: scripts/naruto-panel-requirements.txt
+      - run: python -m pip install --disable-pip-version-check -r scripts/naruto-panel-requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar OpenCode para decidir ações do painel
+        run: npm install --global opencode-ai@1.19.4
+      - name: Testar cliente persistente por até 25 minutos
+        env:
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+          RPG_MODEL: ${{ vars.RPG_MODEL || 'opencode/glm-5.3-flash-free' }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          BUSHIN_STATE_DIR: ${{ runner.temp }}/bushin-command-session
+        run: python scripts/command_service.py
+  comando:
+    permissions:
+      contents: read
+      id-token: write
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/Projeto' && inputs.mode == 'comando'
+    name: Executar comando escolhido no Discord 2
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: Projeto
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        id: command-python
+        with:
+          python-version: "3.11"
+      - name: Reutilizar ambiente do executor
+        id: command-environment
+        uses: actions/cache@v4
+        with:
+          path: .discord2-venv
+          key: discord2-venv-${{ runner.os }}-${{ runner.arch }}-${{ steps.command-python.outputs.python-version }}-${{ hashFiles('scripts/naruto-panel-requirements.txt') }}
+      - name: Instalar cliente existente
+        if: steps.command-environment.outputs.cache-hit != 'true'
+        run: |
+          python -m venv .discord2-venv
+          .discord2-venv/bin/python -m pip install --disable-pip-version-check -r scripts/naruto-panel-requirements.txt
+      - name: Executar uma vez e exigir resposta correlacionada
+        env:
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+          RPG_REQUEST_ID: ${{ inputs.request_id }}
+          RPG_COMMAND_JSON: ${{ inputs.command_json }}
+          RPG_MODE: jogar
+          RPG_ACTION_MARKER: ${{ runner.temp }}/discord2-command-reserved
+        run: .discord2-venv/bin/python scripts/naruto_panel_command.py
+  jogar:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/Projeto' && (inputs.mode == 'diagnostico' || inputs.mode == 'jogar')
+    name: Verificar MCP e acesso autorizado ao Naruto Project
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPENCODE_DISABLE_AUTOUPDATE: "true"
+      RPG_TRANSPORT: direct
+    steps:
+      - name: Definir caminhos de evidencia no runner
+        run: |
+          mkdir -p "$RUNNER_TEMP/naruto-evidence"
+          echo "OPENCODE_CONFIG=$RUNNER_TEMP/naruto-opencode.json" >> "$GITHUB_ENV"
+          echo "RPG_ACTION_MARKER=$RUNNER_TEMP/naruto-action-reserved" >> "$GITHUB_ENV"
+          echo "RPG_AUDIT_PATH=$RUNNER_TEMP/naruto-evidence/naruto-audit.jsonl" >> "$GITHUB_ENV"
+      - name: Baixar branch Projeto
+        uses: actions/checkout@v4
+        with:
+          ref: Projeto
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Instalar dependencias do MCP direto e OpenCode
+        run: |
+          python -m pip install --disable-pip-version-check 'mcp==1.30.0' 'httpx==0.28.1' 'discord.py-self==2.1.0'
+          npm install --global opencode-ai@1.19.4
+          opencode --version
+          mkdir -p "$RUNNER_TEMP/naruto-evidence"
+          python -m py_compile scripts/naruto_*.py
+      - name: Configurar MCP explicitamente
+        run: |
+          python scripts/naruto_opencode_config.py
+          opencode debug config > "$RUNNER_TEMP/naruto-evidence/config-resolvida.json" 2> "$RUNNER_TEMP/naruto-evidence/config.stderr"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          config = json.loads((Path(os.environ['RUNNER_TEMP']) / 'naruto-evidence/config-resolvida.json').read_text())
+          assert config['mcp']['naruto']['enabled'] is True
+          assert Path(config['mcp']['naruto']['command'][1]).is_absolute()
+          PY
+      - name: Testar initialize, descoberta e chamada stdio sem Discord
+        env:
+          RPG_PHASE: stdio_probe
+        run: python scripts/naruto_mcp_probe.py > "$RUNNER_TEMP/naruto-evidence/stdio.json" 2> "$RUNNER_TEMP/naruto-evidence/stdio.stderr"
+      - name: Verificar conexao do MCP pelo OpenCode
+        env:
+          RPG_PHASE: opencode_discovery
+        run: |
+          timeout 120 opencode mcp list > "$RUNNER_TEMP/naruto-evidence/mcp-list.txt" 2> "$RUNNER_TEMP/naruto-evidence/mcp-list.stderr"
+          cat "$RUNNER_TEMP/naruto-evidence/mcp-list.txt"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          rows = [json.loads(line) for line in Path(os.environ['RPG_AUDIT_PATH']).read_text().splitlines()]
+          assert any(r['phase'] == 'opencode_discovery' and r['tool'] == 'list_tools' for r in rows), 'OpenCode nao descobriu ferramentas'
+          PY
+      - name: Diagnosticar conta autorizada independentemente do modelo
+        env:
+          RPG_PHASE: discord_probe
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+        run: python scripts/naruto_mcp_probe.py > "$RUNNER_TEMP/naruto-evidence/discord.json" 2> "$RUNNER_TEMP/naruto-evidence/discord.stderr"
+      - name: OpenCode tenta uma consulta de missoes com evidencia
+        if: inputs.mode == 'jogar'
+        env:
+          RPG_PHASE: opencode_action
+          RPG_MODE: jogar
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RPG_MODEL: ${{ vars.RPG_MODEL || 'opencode/big-pickle' }}
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+        run: |
+          timeout 180 opencode run --format json --agent build --model "$RPG_MODEL" 'Use somente ferramentas naruto. Chame naruto_status_rpg {}. Se conectado ao Naruto Project, chame naruto_read_messages {} e naruto_list_application_commands {}. Se mission_command_available for true, chame naruto_consult_missions {} exatamente UMA vez. Nunca repita apos erro ou timeout. Relate comando tentado, enviado e resposta comprovada separadamente. Nao invente estado do RPG. Pare se login, provedor ou acesso falhar.' > "$RUNNER_TEMP/naruto-evidence/opencode.jsonl" 2> "$RUNNER_TEMP/naruto-evidence/opencode.stderr"
+      - name: Validar evidencia e distinguir bloqueio de jogada concluida
+        if: always()
+        env:
+          RPG_RUN_MODE: ${{ inputs.mode }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ['RPG_AUDIT_PATH'])
+          rows = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+          calls = [r for r in rows if r['phase'] == 'opencode_action' and r['tool'] == 'status_rpg']
+          diagnostic = [r for r in rows if r['phase'] == 'discord_probe' and r['tool'] == 'status_rpg']
+          events_path = Path(os.environ['RUNNER_TEMP']) / 'naruto-evidence/opencode.jsonl'
+          events = [json.loads(line) for line in events_path.read_text().splitlines() if line.strip()] if events_path.exists() else []
+          errors = [e.get('error', {}).get('data', {}) for e in events if e.get('type') == 'error']
+          actions = [r for r in rows if r['tool'] == 'consult_missions']
+          action = actions[-1]['evidence'] if actions else {}
+          summary = {'mcp_started': any(r['tool'] == 'process' for r in rows),
+                     'opencode_discovered_tools': any(r['phase'] == 'opencode_discovery' and r['tool'] == 'list_tools' for r in rows),
+                     'opencode_called_status': len(calls) == 1,
+                     'evidence': calls[-1]['evidence'] if calls else None,
+                     'discord_diagnostic': diagnostic[-1]['evidence'] if diagnostic else None,
+                     'model_errors': [{'message': e.get('message'), 'http_status': e.get('statusCode')} for e in errors],
+                     'action_evidence': action,
+                     'command_sent': action.get('command_sent', False),
+                     'command_completed': action.get('command_completed', False),
+                     'rpg_state_verified': action.get('rpg_state_verified', False)}
+          text = json.dumps(summary, ensure_ascii=False, indent=2)
+          (Path(os.environ['RUNNER_TEMP']) / 'naruto-evidence/resultado.json').write_text(text)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('## Evidencia da integracao\n```json\n' + text + '\n```\n')
+          assert summary['mcp_started'], 'MCP nao iniciou'
+          assert summary['opencode_discovered_tools'], 'OpenCode nao descobriu ferramentas'
+          if os.environ.get('RPG_RUN_MODE') != 'jogar':
+              assert summary['discord_diagnostic'] and summary['discord_diagnostic'].get('status') == 'connected', 'Conexao Discord nao confirmada'
+              raise SystemExit(0)
+          assert summary['opencode_called_status'], 'OpenCode nao chamou status exatamente uma vez'
+          assert summary['command_completed'], 'BLOQUEADO: nenhuma resposta correlacionada ao comando; consulte resultado.json'
+          assert summary['rpg_state_verified'], 'Resposta capturada; estado do RPG ainda requer conferencia do conteudo real'
+          PY
+      - name: Publicar evidencia inclusive erros
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: naruto-jogada-tentativa
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ runner.temp }}/naruto-evidence/
+
+
+  login:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'login' && github.ref == 'refs/heads/Projeto' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'mcp==1.30.0' 'discord.py-self==2.1.0'
+      - name: Verificar identidade e acesso sem enviar comando
+        env:
+          DISCORD_USER_TOKEN: ${{ secrets.DISCORD_USER_TOKEN }}
+        run: |
+          python - <<'PY'
+          import asyncio, json, sys
+          sys.path.insert(0, 'scripts')
+          import naruto_guarded_mcp as executor
+          async def check():
+              try:
+                  result = await executor.status()
+                  safe = {k: result.get(k) for k in ('status', 'account_id', 'guild_accessed', 'channel_accessed', 'error_type', 'http_status')}
+                  print('DISCORD2_LOGIN_RESULT=' + json.dumps(safe))
+                  return result.get('status') == 'connected'
+              finally:
+                  await executor.client.close()
+                  if executor.connection:
+                      executor.connection.cancel()
+                      await asyncio.gather(executor.connection, return_exceptions=True)
+          sys.exit(0 if asyncio.run(check()) else 1)
+          PY
+
+
+  relay:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'relay' && github.ref == 'refs/heads/Projeto' }}
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify private delivery without Discord actions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, json, re, urllib.request, urllib.parse, urllib.error
+          endpoint='https://bushin-discord-direct.henrique-silva081106.workers.dev/internal/discord2-result'
+          request=urllib.request.Request(os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']+'&audience='+urllib.parse.quote(endpoint,safe=''),headers={'Authorization':'Bearer '+os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+          with urllib.request.urlopen(request,timeout=15) as handle:
+              token=json.load(handle)['value']
+          request=urllib.request.Request(endpoint,data=b'{"probe":true}',headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','User-Agent':'Bushin-Discord2-Relay/1.0'},method='POST')
+          try:
+              with urllib.request.urlopen(request,timeout=25) as handle:
+                  result=json.load(handle)
+              stage=result.get('stage','unknown')
+              print(json.dumps({'relay_probe':stage,'storage_verified':result.get('storage_verified',False),'discord_action_sent':False}))
+              raise SystemExit(0 if stage=='ready' and result.get('storage_verified') is True else 1)
+          except urllib.error.HTTPError as exc:
+              body=exc.read(2048).decode('utf-8','replace')
+              try: stage=json.loads(body).get('stage','unknown')
+              except Exception: stage='http_response'
+              edge=re.search(r'error code:\s*(\d+)',body,re.I)
+              print(json.dumps({'response_type':exc.headers.get('Content-Type',''),'server':exc.headers.get('Server',''),'edge_code':int(edge.group(1)) if edge else None}))
+              if stage not in {'method','identity','signing_keys','signature','payload','request_correlation','workflow_correlation','response_validation','encrypted_storage','run_access'}: stage='unknown'
+              print(json.dumps({'relay_probe':stage,'http_status':exc.code,'discord_action_sent':False}))
+              raise SystemExit(1)
+          PY

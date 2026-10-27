@@ -2,7 +2,7 @@
 const REPO='hp0592553-cyber/naruto-rpg-ia';
 const decode=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
 export function validSessionClaims(c,audience,now=Math.floor(Date.now()/1000)){
- return c.iss==='https://token.actions.githubusercontent.com'&&c.aud===audience&&c.repository===REPO&&String(c.repository_id)==='1429981222'&&String(c.repository_owner_id)==='259182200'&&c.ref==='refs/heads/Projeto'&&c.event_name==='workflow_dispatch'&&c.workflow_ref===REPO+'/.github/workflows/opencode-projeto.yml@refs/heads/Projeto'&&c.runner_environment==='github-hosted'&&/^[0-9]{8,20}$/.test(String(c.run_id))&&Number.isInteger(c.exp)&&c.exp>now&&Number.isInteger(c.iat)&&c.iat>=now-600&&c.iat<=now+30&&(c.nbf===undefined||c.nbf<=now+30);
+ return c.iss==='https://token.actions.githubusercontent.com'&&c.aud===audience&&c.repository===REPO&&String(c.repository_id)==='1429981222'&&String(c.repository_owner_id)==='259182200'&&c.ref==='refs/heads/Projeto'&&c.event_name==='workflow_dispatch'&&c.workflow_ref===REPO+'/.github/workflows/bushin-cloudflare-ci.yml@refs/heads/Projeto'&&c.runner_environment==='github-hosted'&&/^[0-9]{8,20}$/.test(String(c.run_id))&&Number.isInteger(c.exp)&&c.exp>now&&Number.isInteger(c.iat)&&c.iat>=now-600&&c.iat<=now+30&&(c.nbf===undefined||c.nbf<=now+30);
 }
 export async function verifySessionJwt(jwt,env,audience){
  let stage="format";
@@ -17,7 +17,7 @@ export async function verifySessionJwt(jwt,env,audience){
   if(!await crypto.subtle.verify('RSASSA-PKCS1-v1_5',key,decode(p[2]),new TextEncoder().encode(p[0]+'.'+p[1])))return {stage};
   stage="run_access";const r=await fetch('https://api.github.com/repos/'+REPO+'/actions/runs/'+c.run_id,{...opts,headers:{Authorization:'Bearer '+env.BUSHIN_GITHUB_TOKEN,Accept:'application/vnd.github+json','User-Agent':'Bushin-Session'}});
   if(!r.ok)return {stage};const run=await r.json();
-  stage="run_validation";if(run.status!=='in_progress'||run.head_branch!=='Projeto'||run.display_title!=='Bushin command session'||run.path!=='.github/workflows/opencode-projeto.yml')return {stage};
+  stage="run_validation";if(run.status!=='in_progress'||run.head_branch!=='Projeto'||run.display_title!=='Bushin command session'||run.path!=='.github/workflows/bushin-cloudflare-ci.yml')return {stage};
   return {run_id:String(c.run_id)};
  }catch{return {stage}}
 }
