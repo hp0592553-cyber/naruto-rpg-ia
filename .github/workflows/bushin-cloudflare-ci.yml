@@ -47,7 +47,12 @@ jobs:
       - name: Verificar bindings, imports, interface e seguranca do projeto
         run: node scripts/verify-bushin-ci.mjs
       - name: Testar comportamento do Bushin com mocks (sem Discord real)
-        run: node --test cloudflare/tests/*.test.mjs
+        id: unit_tests
+        continue-on-error: true
+        run: |
+          mkdir -p dist/diagnostics
+          node --test --test-reporter=tap cloudflare/tests/*.test.mjs > dist/diagnostics/unit-tests.tap 2>&1 || { tail -n 100 dist/diagnostics/unit-tests.tap; exit 1; }
+          tail -n 30 dist/diagnostics/unit-tests.tap
       - name: Exportar HTML real do Discord 2
         run: node scripts/export-discord2-html.mjs dist/discord2
       - name: Verificar JavaScript exportado
@@ -62,8 +67,14 @@ jobs:
           path: |
             dist/discord2/
             dist/worker-build/
+            dist/diagnostics/
           if-no-files-found: warn
           retention-days: 7
+      - name: Falhar CI se os testes do Bushin falharam
+        if: always() && steps.unit_tests.outcome == 'failure'
+        run: |
+          echo '::error::Testes do Bushin falharam; consulte unit-tests.tap no artefato bushin-cloudflare-ci.'
+          exit 1
 
   deploy:
     name: Publicar somente com confirmacao manual
