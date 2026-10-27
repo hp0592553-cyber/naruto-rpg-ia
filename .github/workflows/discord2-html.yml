@@ -2,18 +2,8 @@ name: Discord 2 HTML - build e validacao
 
 on:
   workflow_dispatch:
-  push:
-    branches: [Projeto]
-    paths:
-      - 'cloudflare/**'
-      - 'scripts/export-discord2-html.mjs'
-      - '.github/workflows/discord2-html.yml'
-  pull_request:
-    paths:
-      - 'cloudflare/**'
-      - 'scripts/export-discord2-html.mjs'
-      - '.github/workflows/discord2-html.yml'
-
+# Workflow legado mantido para execucao manual.
+# Na branch Projeto, CI, HTML e deploy sao coordenados pelo bushin-cloudflare-ci.yml.
 permissions:
   contents: read
 
