@@ -3,10 +3,20 @@
   "main": "worker.mjs",
   "compatibility_date": "2026-10-19",
   "keep_vars": true,
-  "browser": {"binding": "BUSHIN_RENDERER"},
-  "d1_databases": [{
-    "binding": "DB",
-    "database_name": "bushin-discord-auth",
-    "database_id": "54cf8136-270e-453a-a123-dade96239366"
-  }]
+  "browser": {
+    "binding": "BUSHIN_RENDERER"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bushin-discord-auth",
+      "database_id": "54cf8136-270e-453a-a123-dade96239366"
+    }
+  ],
+  "ai": {
+    "binding": "BUSHIN_AI"
+  },
+  "observability": {
+    "enabled": true
+  }
 }
