@@ -13,7 +13,7 @@ class Element {
 const text=e=>e.textContent+e.children.map(text).join('');
 function fixture(){
  const c=vm.createContext({Intl,URL,Date,document:{createElement:t=>new Element(t),createTextNode:t=>Object.assign(new Element('#text'),{textContent:t})},gameUrl:()=> 'https://discord.com/channels/1/2/3',knownPeople:new Map(),safeDisplay:s=>s,S:{channels:[]}});
- const chunks=[['function discordTimestamp(','function trusted('],['function renderMentionText(','function findMentionPeople('],['function gameControls(','const knownPeople='],['function messageExtras(','function render(mode=']];
+ const chunks=[['function discordTimestamp(','function trusted('],['function renderMentionText(','function findMentionPeople('],['function liveOwnResponse(','function gameControls('],['function gameControls(','const knownPeople='],['function messageExtras(','function render(mode=']];
  for(const [a,b] of chunks)vm.runInContext(PANEL_JS.slice(PANEL_JS.indexOf(a),PANEL_JS.indexOf(b,PANEL_JS.indexOf(a))),c);
  const a=PANEL_JS.indexOf('const author='),b=PANEL_JS.indexOf('function searchKey(',a);vm.runInContext(PANEL_JS.slice(a,b)+';this.authorName=author',c);
  return c;

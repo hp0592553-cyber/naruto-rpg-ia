@@ -49,7 +49,7 @@ test('AI reply draft validates a real old NPC message, never sends by itself',as
  const cursor=(BigInt(MID)+1n).toString();
  const helpers={reply,baseUrl,readChat:async(_env,name,args)=>{
   assert.equal(name,'bushin_naruto_personal_read');
-  assert.deepEqual(args,{channel_id:CHANNEL,limit:24,before:cursor});
+  assert.deepEqual(args,{channel_id:CHANNEL,limit:16,before:cursor});
   return {read:true,messages:[{id:MID,author_id:AUTHOR,author_bot:true,content:'O que você quer aqui, ninja?',timestamp:new Date().toISOString()}]};
  }};
  const resp=await playerChatDraftRoute(request({channel_id:CHANNEL,message_id:MID}),env,ctx,helpers);

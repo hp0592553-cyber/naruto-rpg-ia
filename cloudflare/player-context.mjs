@@ -5,7 +5,7 @@ export function roleplayMessageText(m){
  const plain=String(m?.normalized_text||m?.content||'').trim();
  const embeds=(Array.isArray(m?.embeds)?m.embeds:[]).slice(0,2).map(e=>[e.title,e.description,...(e.fields||[]).slice(0,2).map(f=>String(f.name||'')+': '+String(f.value||''))].filter(Boolean).join(' · ')).filter(Boolean).join(' | ');
  const componentText=(m?.components||[]).slice(0,3).flatMap(x=>(x.components||[]).filter(c=>Number(c?.type)===10).map(c=>String(c.content||''))).join(' ');
- return [plain,embeds||componentText].filter(Boolean).join(' | ').slice(0,650);
+ return [plain,embeds||componentText].filter(Boolean).join(' | ').slice(0,1600);
 }
 export function chatContext(messages){
  return (messages||[]).slice(0,20).map(m=>({

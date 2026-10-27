@@ -23,12 +23,12 @@ test('authorized adapter controls never fall back to the personal component exec
 });
 test('site navigation follows a new allowed action once and never moves while stopped',()=>{
  const calls=[],s={phase:'running',site_action:{id:'operation',type:'channel',channel_id:'forest'}};const c=vm.createContext({s,S:{current:'commands',channels:[{id:'forest'}]},autoplaySiteAction:null,select:id=>{calls.push(id);return Promise.resolve()},status(){}});
- const a=AUTOPLAY_JS.indexOf(' const active='),b=AUTOPLAY_JS.indexOf(' E("autoplayStart")',a),code='{'+AUTOPLAY_JS.slice(a,b)+'}';vm.runInContext(code,c);vm.runInContext(code,c);assert.deepEqual(calls,['forest']);s.phase='stopped';s.site_action.id='next';vm.runInContext(code,c);assert.equal(calls.length,1);
+ const a=AUTOPLAY_JS.indexOf(' const active='),b=AUTOPLAY_JS.indexOf(' E("autoplayInstruct")',a),code='{'+AUTOPLAY_JS.slice(a,b)+'}';vm.runInContext(code,c);vm.runInContext(code,c);assert.deepEqual(calls,['forest']);s.phase='stopped';s.site_action.id='next';vm.runInContext(code,c);assert.equal(calls.length,1);
 });
 test('Stop submits immediately while Start is waiting for a status GET',async()=>{
  const requests=[],nodes=new Map();let release;
  const current={state:{revision:1,phase:'stopped'}};
- const c=vm.createContext({autoplayControlBusy:false,autoplayStopBusy:false,autoplayData:current,autoplayPollingFailed:false,S:{current:'1520114348079583263'},
+ const c=vm.createContext({autoplayControlBusy:false,autoplayStopBusy:false,autoplayData:current,autoplayPollingFailed:false,autoplayTransientRetryAt:0,autoplayLogError(){},S:{current:'1520114348079583263'},
   E:id=>{if(!nodes.has(id))nodes.set(id,{value:''});return nodes.get(id)},renderAutoplay(){},
   refreshAutoplay:()=>new Promise(resolve=>{release=resolve}),
   req:async(_path,options)=>{const data=JSON.parse(options.body);requests.push(data);return {state:{revision:2,phase:'stopped'}}}});
@@ -44,7 +44,7 @@ test('a late Start conflict does not replace a newer confirmed Stop with an erro
  const nodes=new Map();let release,startEntered;const pending=new Promise(resolve=>{release=resolve}),entered=new Promise(resolve=>{startEntered=resolve});
  let current={state:{revision:0,phase:'stopped'}};
  const E=id=>{if(!nodes.has(id))nodes.set(id,{value:''});return nodes.get(id)};
- const c=vm.createContext({autoplayControlBusy:false,autoplayStopBusy:false,autoplayData:current,autoplayPollingFailed:false,S:{current:'1520114348079583263'},E,
+ const c=vm.createContext({autoplayControlBusy:false,autoplayStopBusy:false,autoplayData:current,autoplayPollingFailed:false,autoplayTransientRetryAt:0,autoplayLogError(){},S:{current:'1520114348079583263'},E,
   renderAutoplay:()=>{E('autoplayStatus').textContent='Parado.'},refreshAutoplay:async()=>current,
   req:async(_path,options)=>{if(JSON.parse(options.body).action==='stop'){current={state:{revision:1,phase:'stopped'}};return current}startEntered();await pending;throw Error('Estado mudou.');}});
  const a=AUTOPLAY_JS.indexOf('async function controlAutoplay('),b=AUTOPLAY_JS.indexOf('async function autoplayTick',a);

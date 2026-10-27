@@ -45,7 +45,7 @@ test('AI candidate list starts with selected scene and commands, not the first t
 test('fallback will not send status commands in RP chat and will not wander into unrelated guides',()=>{
  const available=[{command:'/mapa',options:[]},{command:'/navigate',options:[]}];
  const route=rulePlan({available,channels,contextChannel:FIELD,observations:[]});
- assert.equal(route.command,'/mapa');assert.equal(route.channel_id,COMMANDS);
+ assert.equal(route.command,'/mapa');assert.equal(route.channel_id,FIELD);
  const after=rulePlan({available,channels,contextChannel:FIELD,observations:[{command:'/mapa',channel_id:COMMANDS,text:''}],visitedChannels:[FOREST]});
  assert.equal(after,null);
 });

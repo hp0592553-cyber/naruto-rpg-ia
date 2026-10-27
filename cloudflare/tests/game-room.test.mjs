@@ -145,7 +145,7 @@ test('Mobile browser in desktop-site viewport still sees a single-panel chat and
 
 
 test('Natural language gameplay controls target the execution controller instead of disguised planning',()=>{
- assert.match(PANEL_JS,/controlAutoplay\(autoControl/);
+ assert.match(PANEL_JS,/controlAutoplay\(effectiveAction/);
  assert.match(PANEL_JS,/await autoplayTick\(\)/);
  assert.match(PANEL_JS,/continua\|continue\|continuar\|retome/);
  assert.doesNotThrow(()=>new Function(PANEL_JS));

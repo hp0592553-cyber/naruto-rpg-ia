@@ -19,7 +19,7 @@ for (const status of [401,403,503]) test('upstream '+status+' preserves auth sem
  const res=await worker.fetch(new Request('https://example.test/mcp',{method:'POST',headers:{
   'content-type':'application/json',authorization:'Bearer synthetic-bushin-access-token'},
   body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'bushin_discord_whoami',arguments:{}}})}),await fixture(),{});
- const body=await res.text();assert.equal(calls,1);assert.ok(!body.includes('synthetic-upstream-access'));
+ const body=await res.text();assert.equal(calls,1,'No upstream Discord call: status='+res.status+' body='+body.slice(0,150));assert.ok(!body.includes('synthetic-upstream-access'));
  if(status===401){assert.equal(res.status,401);assert.match(res.headers.get('www-authenticate'),/invalid_token/)}
  else {assert.equal(res.status,200);assert.equal(JSON.parse(body).result.isError,true);assert.equal(res.headers.get('www-authenticate'),null)}
 });

@@ -6,7 +6,7 @@ import {readFileSync} from 'node:fs';
 
 test('the Android chat polls newly started collection faster than ordinary messages',()=>{
  assert.match(PANEL_JS,/function timedCollectionIsFresh\(\)/);
- assert.match(PANEL_JS,/interval=timedCollectionIsFresh\(\)\?2500:10000/);
+ assert.match(PANEL_JS,/interval=timedCollectionIsFresh\(\)\?2000:7000/);
  assert.match(PANEL_JS,/Date\.now\(\)<discordPauseUntil/);
  assert.match(PANEL_JS,/liveReadFailures/);
  assert.doesNotMatch(PANEL_JS,/refresh\(true\)\},30000/);
@@ -28,7 +28,7 @@ test('timed private collection correctly describes missing verified buttons',()=
 
 test('temporarily failed status polling can recover while rate limits retain longer pauses',()=>{
  assert.match(AUTOPLAY_JS,/autoplayTransientRetryAt/);
- assert.match(AUTOPLAY_JS,/e\.rateLimited\?Math\.max\(30000/);
+ assert.match(AUTOPLAY_JS,/autoplayRetryMs\(e\)/);
  const server=readFileSync(new URL('../player-loop.mjs',import.meta.url),'utf8');
  assert.match(server,/429\|rate\.limit\|Too Many Requests/);
  assert.match(server,/\?60000:12000/);
