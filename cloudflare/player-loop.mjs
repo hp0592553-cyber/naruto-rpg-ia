@@ -4,8 +4,9 @@ import {commandServiceHealth,commandServiceMobile,startCommandSession} from './c
 import {personalInspectCommand,personalListChannels,personalCall} from './personal-discord.mjs';
 import {chatContext,replyTarget,replyText} from './player-context.mjs';
 import {learnStep} from './player-learning.mjs';
+import {COMMANDS_CHANNEL,channelText,channelKind,readableChannels,choosePlayerChannel,planningChannels,expectedActionChannel} from './player-channel.mjs';
 import {responseSnapshot} from './rpg-agent.mjs';
-const CHANNEL='1520114348079583263',MODEL='@cf/meta/llama-3.1-8b-instruct-fp8';
+const CHANNEL=COMMANDS_CHANNEL,MODEL='@cf/meta/llama-3.1-8b-instruct-fp8';
 const WORKERS_AI=MODEL;
 const kinds=/^\/(perfil ver|nivel|mapa|missoes (minhas|ativas|diarias)|viajar|acao coletar|interagir npc)$/;
 // Catalog traversal uses a slash joined directly to the root.
@@ -15,27 +16,27 @@ export function ownComponentOptions(options,last){const result={...options};cons
 export function travelArrival(text){if(!/Viagem iniciada|Chegada automática/i.test(text||''))return null;const stamp=String(text).match(/<t:(\d{10}):[FRf]> /)||String(text).match(/<t:(\d{10}):[FRf]>/);return stamp?Number(stamp[1])*1000:null;}
 const ruleOrder=['/missoes minhas','/missoes ativas','/perfil ver','/nivel','/missoes diarias','/viajar','/acao coletar','/interagir npc','/mapa'];
 export function rulePlan({available=[],observations=[],uncertain=[],contextChannel=CHANNEL,channels=[],gate=null,refused=false}){
- const key=s=>String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+ const list=readableChannels(channels),key=channelText;
  const text=observations.map(x=>key(x.text)).join(' ');
  const seen=(command,channel)=>observations.some(x=>x.command===command&&(x.channel_id||CHANNEL)===channel);
  const unsafe=(command,channel)=>uncertain.some(x=>x.command===command&&(x.channel_id||CHANNEL)===channel);
  const usable=command=>available.find(x=>x.command===command)&&!available.find(x=>x.command===command).options?.some(o=>o.required);
- const channelFor=command=>command==='/viajar'&&gate?gate.id:contextChannel;
+ const channelFor=command=>expectedActionChannel(command,{channels:list,current:contextChannel,gate});
  const hints=[];
  if(/viaj|floresta|rio|portao|konoha/.test(text))hints.push('/viajar','/mapa');
  if(/colet|buscar|procurar|encontrar/.test(text))hints.push('/acao coletar');
  if(/npc|falar|convers|interagir|ajudar/.test(text))hints.push('/interagir npc');
- for(const command of [...hints,...ruleOrder]){
+ for(const command of [...new Set([...hints,...ruleOrder])]){
   if(!usable(command))continue;
   const channel=channelFor(command);
-  if(!channels.some(c=>c.id===channel)||seen(command,channel)||unsafe(command,channel))continue;
+  if(!channel||!list.some(c=>c.id===channel)||seen(command,channel)||unsafe(command,channel))continue;
   if(command==='/viajar'&&refused&&observations.some(x=>x.command==='/viajar'&&x.channel_id===channel))continue;
-  return {command,channel_id:channel,options:{},reason:'Regra local: '+command+' ainda não conferido neste canal.',provider:'local-rules',model:'catalog-v1'};
+  return {command,channel_id:channel,options:{},reason:'Regra local: '+command+' no canal apropriado, ainda não conferido.',provider:'local-rules',model:'catalog-v2'};
  }
- const usableCommands=ruleOrder.filter(command=>usable(command));
- if(usableCommands.length){
-  const fresh=channels.filter(c=>c.id!==contextChannel&&[0,5].includes(Number(c.type))).find(c=>usableCommands.some(command=>!seen(command,c.id)&&!unsafe(command,c.id)));
-  if(fresh)return {command:'/navigate',channel_id:fresh.id,options:{},reason:'Regra local: ler outro canal acessível antes de repetir uma ação.',provider:'local-rules',model:'catalog-v1'};
+ // Never wander into rules, announcements or social channels to try RPG commands.
+ const scene=list.find(c=>c.id!==contextChannel&&channelKind(c)==='scene');
+ if(scene&&available.some(c=>c.command==='/navigate')&&!observations.some(x=>x.command==='/navigate'&&x.channel_id===scene.id)){
+  return {command:'/navigate',channel_id:scene.id,options:{},reason:'Ler cenário acessível sem executar comando nem supor que o personagem viajou.',provider:'local-rules',model:'catalog-v2'};
  }
  return null;
 }
@@ -74,14 +75,14 @@ export async function playerChatDraftRoute(req,env,ctx,{reply,baseUrl,readChat=p
  return reply({state:'completed',channel_id,message_id,author_id:target.author_id,text,sent:false,model:WORKERS_AI},200,HEAD);
 }
 
-export async function workersAiPlan(env,{available=[],observations=[],channels=[],contextChannel=CHANNEL,last=null,goal=''}){
+export async function workersAiPlan(env,{available=[],observations=[],channels=[],contextChannel=CHANNEL,last=null,goal='',location=''}){
  if(!env.BUSHIN_AI||typeof env.BUSHIN_AI.run!=='function')return {error:'workers_ai_unavailable'};
  const usable=available.filter(c=>!c.options?.some(o=>o.required)).slice(0,18);
  const input={
   goal:String(goal||'Jogar Naruto Project até o nível 20.').slice(0,120),
   context_channel_id:contextChannel,
   commands:usable.map(c=>({command:c.command,description:String(c.description||'').slice(0,160)})),
-  channels:channels.slice(0,12).map(c=>({id:c.id,name:String(c.name||'').slice(0,80)})),
+  channels:planningChannels(channels,contextChannel,location).map(c=>({id:c.id,name:String(c.name||'').slice(0,80)})),
   observations:observations.slice(-8).map(o=>({command:o.command,text:String(o.text||'').slice(0,700)})),
   last_response:last?{message_id:last.message_id,channel_id:last.channel_id,controls:(last.controls||[]).slice(0,8).map(c=>({type:c.type,label:c.label,custom_id:c.custom_id}))}:null
  };
@@ -103,7 +104,13 @@ export async function workersAiPlan(env,{available=[],observations=[],channels=[
  if(Object.keys(options).some(name=>!fields.some(f=>f.name===name)))return {error:'unknown_option',command};
  if(Object.entries(options).some(([,value])=>!['string','boolean','number'].includes(typeof value)))return {error:'invalid_option',command};
  if(fields.some(f=>f.required&&!Object.hasOwn(options,f.name)))return {error:'missing_option',command};
- const channel=channels.some(c=>c.id===choice.channel_id)?choice.channel_id:contextChannel;
+ const candidates=planningChannels(channels,contextChannel,location);
+ const channel=candidates.some(c=>c.id===choice.channel_id)?choice.channel_id:contextChannel;
+ if(command==='/navigate'&&!candidates.some(c=>c.id===channel&&channelKind(c)==='scene'))return {error:'unverified_navigation',command};
+ if(command!=='/navigate'&&command!=='/component'){
+  const gate=candidates.find(c=>channelText(c.name).includes('portao')&&channelText(c.name).includes('konoha'));
+  if(expectedActionChannel(command,{channels:candidates,current:contextChannel,gate})!==channel)return {error:'wrong_command_channel',command};
+ }
  return {plan:{command,options,channel_id:channel,reason:String(choice.reason||'Decisão do motor Llama no Worker.').slice(0,300),provider:'workers-ai',model:WORKERS_AI},model:WORKERS_AI};
 }
 export function confirmPlayerResult(state,pending,result,owner){
