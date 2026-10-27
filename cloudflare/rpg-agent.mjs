@@ -12,7 +12,7 @@ export function responseSnapshot(request,message,owner){
  if(interactionUser&&String(interactionUser)!==owner)return null;
  const fields=(message.embeds||[]).flatMap(e=>e.fields||[]),stats={};
  const names={'nível':'level','nivel':'level','xp':'xp','vida':'hp','chakra':'chakra','energia':'energy'};
- for(const f of (/^\/?(?:perfil ver|nivel)$/.test(request.command)?fields:[])){const key=names[String(f.name||'').normalize('NFKC').trim().toLowerCase()];if(!key)continue;
+ for(const f of (/^\/?(?:perfil (?:ver|nivel|atributos)|nivel)$/.test(request.command)?fields:[])){const key=names[String(f.name||'').normalize('NFKC').trim().toLowerCase()];if(!key)continue;
   const match=String(f.value||'').trim().match(/^(\d{1,9})(?:\s*\/\s*(\d{1,9}))?$/);if(match)stats[key]={value:Number(match[1]),max:match[2]?Number(match[2]):null,message_id:message.id};
  }
  const text=String(message.normalized_text||'');
