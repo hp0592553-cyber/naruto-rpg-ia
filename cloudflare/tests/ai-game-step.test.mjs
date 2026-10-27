@@ -67,3 +67,35 @@ test('AI suggested combat cannot be executed even with an otherwise valid catalo
  assert.equal(data.next_action,null);
  assert.equal(data.sent,false);
 });
+
+test('AI actually invokes the model in HTML autoplay without an unverified character snapshot',async t=>{
+ const f=fixture('/perfil ver');
+ const calls=[];
+ f.env.BUSHIN_AI.run=async(model,args)=>{
+  calls.push({model,args});
+  return {response:JSON.stringify({analise:'Falta ficha confirmada; preciso consultar o perfil.',proximo_passo:'Consultar ficha do jogador.',mensagem:'',comando:'/perfil ver'})};
+ };
+ t.mock.method(globalThis,'fetch',async url=>{
+  const s=String(url);
+  if(s.includes('naruto-rp.squareweb.app'))return new Response('<html></html>',{headers:{'content-type':'text/html'}});
+  if(s.endsWith('/users/@me'))return Response.json({id:user});
+  if(s.endsWith('/channels/'+ch))return Response.json({guild_id:'1515877468299595919'});
+  if(s.endsWith('/application-command-index'))return Response.json({application_commands:[{
+   id:'123456789012345678',version:'123456789012345679',application_id:app,type:1,name:'perfil',
+   options:[{name:'ver',type:1,options:[]}]
+  }]});
+  return Response.json([]);
+ });
+ const response=await bushinAiNext(f.request,f.env,f.ctx,f.helpers);
+ assert.equal(response.status,200);
+ const data=await response.json();
+ assert.equal(calls.length,1,'the AI model must run instead of returning a fixed suggestion');
+ assert.equal(data.model_invoked,true);
+ assert.equal(data.character_confirmed,false);
+ assert.match(data.analysis,/Falta ficha confirmada/);
+ assert.equal(data.next_action.command,'/perfil ver');
+ assert.equal(data.executed_command,false);
+ assert.equal(data.sent,false);
+ assert.match(calls[0].args.messages[0].content,/Nunca atribua perfil/);
+ assert.match(PANEL_JS,/Modelo acionado/);
+});
