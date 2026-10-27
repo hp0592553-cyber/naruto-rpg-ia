@@ -26,9 +26,21 @@ export function fixMobileJs(js){
  js=replaceOnce(js,'...(opt?.body?{"content-type":"application/json"}:{})','...(opt?.body&&!(opt.body instanceof FormData)?{"content-type":"application/json"}:{})');
  js=replaceOnce(js,'if(d.state==="cooldown")e.cooldown=true;throw e','e.sent=d.sent;if(d.state==="cooldown")e.cooldown=true;throw e');
  js=replaceOnce(js,'e.rateLimited=true;e.retryAfter=seconds;throw e','e.rateLimited=true;e.retryAfter=seconds;e.sent=d.sent;throw e');
+ // Add a direct on-demand AI reply to an actual, confirmed chat message.
+ js=replaceOnce(js,'line.append(rep);part.append(line);',String.raw`line.append(rep);
+  if(!m.ephemeral&&String(m.author_id||m.author?.id||"")!=="481485837801095178"&&/^\d{15,22}$/.test(String(m.id||""))){
+   const ai=document.createElement("button");ai.type="button";ai.className="replyMessageBtn";ai.textContent="✨ IA responder";
+   ai.title="Gerar resposta com Llama e enviar uma vez ao tocar";
+   ai.onclick=()=>sendAiReplyForMessage(m,ai);line.append(ai);
+  }
+  part.append(line);`);
+ // Keep existing messages and expose bounded batches of older pages.
+ js=replaceOnce(js,'if(S.before){const btn=document.createElement("button");btn.className="older";btn.textContent="↑ Carregar mensagens mais antigas";btn.onclick=older;root.append(btn)}',String.raw`if(S.before){const btn=document.createElement("button");btn.className="older";btn.textContent="↑ Carregar mensagens mais antigas";btn.onclick=older;root.append(btn);
+  const batch=document.createElement("button");batch.className="older";batch.textContent="↑ Carregar até 500 anteriores";batch.disabled=historyBatchRunning;batch.onclick=loadHistoryBatch;root.append(batch)}`);
  // A channel switch owns a new request even if the old channel is still loading.
  js=replaceOnce(js,'S.before=null;S.seq++;let c=','S.before=null;S.seq++;S.busy=false;forumBusy=false;let c=');
  js=replaceSection(js,'async function refresh(','async function send(',part=>{
+  part=replaceOnce(part,'?limit=12','?limit=50');
   part=replaceOnce(part,'const recent=(d.messages||[]).slice().reverse();','if(d.read!==true||!Array.isArray(d.messages))throw Error(d.reason||"A API não confirmou a leitura deste canal.");\n  const recent=d.messages.slice().reverse();');
   part=replaceOnce(part,'}catch(e){if(!quiet&&!e.rateLimited)', '}catch(e){if(seq!==S.seq||channel!==S.current)return;if(!quiet&&!e.rateLimited)');
   part=replaceOnce(part,'finally{S.busy=false}', 'finally{if(seq===S.seq&&channel===S.current)S.busy=false}');
@@ -37,12 +49,50 @@ export function fixMobileJs(js){
   part=replaceOnce(part,'}catch(e){status(', '}catch(e){if(id!==S.current||seq!==S.seq)return;status(');
   return replaceOnce(part,'finally{S.busy=false}', 'finally{if(id===S.current&&seq===S.seq)S.busy=false}');
  });
+ // Increase history pages from 12 to 50; retain the cursor and prevent out-of-order channel mixing.
+ js=replaceSection(js,'async function older(){','async function send(){',part=>{
+  part=replaceOnce(part,'?limit=12&before=','?limit=50&before=');
+  part=replaceOnce(part,'S.busy=true;const id=S.current,feed=','S.busy=true;const seq=++S.seq,id=S.current,feed=');
+  part=replaceOnce(part,'if(id!==S.current)return;','if(id!==S.current||seq!==S.seq)return;\n  if(d.read!==true||!Array.isArray(d.messages))throw Error(d.reason||"Histórico não confirmado.");');
+  part=replaceOnce(part,'}catch(e){status(','}catch(e){if(id!==S.current||seq!==S.seq)return;status(');
+  return replaceOnce(part,'finally{S.busy=false}','finally{if(id===S.current&&seq===S.seq)S.busy=false}');
+ });
  js=replaceSection(js,'async function loadForumPosts(','async function select(',part=>{
   part=replaceOnce(part,'forumBusy=true;', 'forumBusy=true;const seq=++S.seq;');
   part=replaceOnce(part,'if(id!==S.current)return;', 'if(id!==S.current||seq!==S.seq)return;');
   part=replaceOnce(part,'}catch(e){if(!quiet)', '}catch(e){if(id!==S.current||seq!==S.seq)return;if(!quiet)');
   return replaceOnce(part,'finally{forumBusy=false}', 'finally{if(id===S.current&&seq===S.seq)forumBusy=false}');
  });
+ js=replaceOnce(js,'async function send(){',String.raw`let historyBatchRunning=false;
+async function loadHistoryBatch(){
+ if(historyBatchRunning||S.busy||!S.before||!S.current)return;
+ const channel=S.current;historyBatchRunning=true;let pages=0;
+ try{
+  while(channel===S.current&&S.before&&pages<10){
+   const previous=S.before;
+   await older();
+   if(channel!==S.current||S.before===previous)break;
+   pages++;
+   if(S.before&&pages<10)await new Promise(resolve=>setTimeout(resolve,450));
+  }
+  if(channel===S.current&&pages)status("Histórico: "+S.messages.length+" mensagens deste canal carregadas."+(S.before?" Toque novamente para mais antigas.":" Chegou ao início do histórico acessível."));
+ }finally{historyBatchRunning=false;if(channel===S.current)render("keep");}
+}
+async function sendAiReplyForMessage(m,button){
+ const channel=S.current,mid=String(m.id||""),editor=E("message");
+ if(editor.value.trim()||mobileFiles().length){status("Limpe o rascunho e os anexos antes de pedir à IA para responder.",true);return;}
+ const initial=editor.value,initialReply=replyTarget;
+ button.disabled=true;status("Llama preparando resposta para a mensagem selecionada...");
+ try{
+  const result=await req("/ai/chat-draft",{method:"POST",body:JSON.stringify({channel_id:channel,message_id:mid})});
+  if(S.current!==channel||editor.value!==initial||replyTarget!==initialReply){status("Canal ou rascunho mudou; não enviei nada.",true);return;}
+  if(result.channel_id!==channel||result.message_id!==mid||result.state!=="completed"||typeof result.text!=="string"||!result.text.trim())throw Error("Resposta da IA não corresponde à mensagem.");
+  setReplyTarget(m);editor.value=result.text.trim();
+  await send();
+ }catch(e){if(S.current===channel)status("IA não enviou: "+e.message,true);}
+ finally{button.disabled=false;}
+}
+async function send(){`);
  js=replaceSection(js,'async function send(){','async function copy(){',()=>String.raw`function mobileFiles(){return Array.from(E("messageFiles").files||[]);}
 function mobileFileKey(files){return JSON.stringify(files.map(f=>[f.name,f.size,f.lastModified]));}
 function clearMobileFiles(){E("messageFiles").value="";E("messageFileStatus").textContent="";E("clearMessageFiles").hidden=true;}
