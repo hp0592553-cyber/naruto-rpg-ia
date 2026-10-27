@@ -216,7 +216,12 @@ async function discordFetch(token,path){
   if(res.status===401)throw oauthError("invalid_grant","Discord authorization expired.",401);
   if(res.status===404)return null;
   if(res.status===403)throw oauthError("insufficient_scope","Missing Discord permission.",403);
-  if(!res.ok)throw oauthError("temporarily_unavailable","Discord temporarily unavailable.",503);
+  if(res.status===429){
+    const retry=Number(res.headers.get("retry-after"));
+    const seconds=Number.isFinite(retry)&&retry>0?Math.max(1,Math.min(900,Math.ceil(retry))):60;
+    throw oauthError("discord_rate_limited","Discord aplicou limite HTTP 429. Aguarde "+seconds+" segundos antes de tentar novamente.",429);
+  }
+  if(!res.ok)throw oauthError("temporarily_unavailable","Discord temporariamente indisponível (HTTP "+res.status+").",503);
   return res.json();
 }
 async function verified(env,creds){
