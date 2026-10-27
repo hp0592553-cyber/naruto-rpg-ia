@@ -19,6 +19,11 @@ export function fixMobileHtml(html){
 .playerEvidence summary{min-height:44px;display:list-item;padding:12px 4px;cursor:pointer}
 .playerEvidence button{margin:4px 4px 4px 0}
 .playerEvidence [id^="autoplay"]{white-space:pre-wrap}
+ /* The original CSS hid #gamePanel even when opened. */
+ #gamePanel:not([hidden]){display:block!important;max-height:43dvh;overflow:auto;overscroll-behavior:contain}
+ #gameToolbox:not([hidden]),#commandResponse:not([hidden]){display:block!important}
+ #gamePanel .gameAction,.msg .gameAction{min-height:44px;touch-action:manipulation;cursor:pointer}
+ #gamePanel select,.msg select{min-height:44px;max-width:100%;touch-action:manipulation}
 @media(max-width:1200px){.inputArea{padding-bottom:max(8px,env(safe-area-inset-bottom))}#message{font-size:16px;min-width:0}.playerEvidence{max-height:28dvh}}
 </style>`);
 }
@@ -86,7 +91,7 @@ async function sendAiReplyForMessage(m,button){
  const initial=editor.value,initialReply=replyTarget;
  button.disabled=true;status("Llama preparando resposta para a mensagem selecionada...");
  try{
-  const result=await req("/ai/chat-draft",{method:"POST",body:JSON.stringify({channel_id:channel,message_id:mid})});
+  const result=await req("/ai/chat-draft",{method:"POST",body:JSON.stringify({channel_id:channel,message_id:mid,channel_name:String(S.channels.find(c=>c.id===channel)?.name||"").slice(0,80)})});
   if(S.current!==channel||editor.value!==initial||replyTarget!==initialReply){status("Canal ou rascunho mudou; não enviei nada.",true);return;}
   if(result.channel_id!==channel||result.message_id!==mid||result.state!=="completed"||typeof result.text!=="string"||!result.text.trim())throw Error("Resposta da IA não corresponde à mensagem.");
   setReplyTarget(m);editor.value=result.text.trim();
@@ -156,6 +161,24 @@ async function send(){
  js=replaceOnce(js,'E("codexMessage").value="";\n  codexChatPendingId=', 'if(E("codexMessage").value.trim()===question)E("codexMessage").value="";\n  codexChatPendingId=');
  js=replaceOnce(js,'startSlashProgress("/component");','startSlashProgress("/component",Date.now(),result.request_id,response.channel_id);');
  js=replaceOnce(js,'const current=await req("/ai/opencode"),live=current.response;','const current=await req("/ai/opencode"),live=current.game_response||current.response;');
+  // Make the most recent confirmed bot notification clickable inside the chat,
+  // while keeping historical/unverified buttons non-interactive.
+  js=replaceOnce(js,'function gameControls(parent,m){',String.raw`function liveOwnResponse(m){
+   if(m.own_response===true)return true;
+   const d=typeof autoplayData==="undefined"?null:autoplayData?.state?.last_result;
+   return String(m.author_id||"")==="1515908078913192026"&&!!d?.response&&
+    String(m.id||m.message_id||"")===String(d.response.message_id||"")&&
+    String(m.channel_id||"")===String(d.response.channel_id||"")&&
+    Date.now()-Number(d.at||0)<600000;
+  }
+  function gameControls(parent,m){`);
+  js=replaceOnce(js,'if(m.own_response){for(const c of m.controls||[])appendOwnGameControl(parent,m,c);return;}',
+   'if(liveOwnResponse(m)){for(const c of m.controls||[])appendOwnGameControl(parent,m,c);return;}');
+  js=replaceOnce(js,'if(m.own_response&&Number(c.style)!==5){appendOwnGameControl(parent,m,c);drawn++;return;}',
+   'if(liveOwnResponse(m)&&Number(c.style)!==5){appendOwnGameControl(parent,m,c);drawn++;return;}');
+  js=replaceOnce(js,'note.textContent=m.own_response?"Toque nas opções desta caixa para agir no jogo."',
+   'note.textContent=liveOwnResponse(m)?"Toque nas opções desta caixa para agir no jogo."');
+
  js=replaceSection(js,'const slashProgressKey=','async function sendSelectedSlash(',part=>{
   part=replaceOnce(part,'const r=await req("/ai/opencode");','const r=await req("/ai/opencode"+(current.request_id?"?request_id="+encodeURIComponent(current.request_id):""));');
   part=replaceOnce(part,'if(r.command&&r.command!==current.command){',String.raw`if(current.request_id&&r.request_id!==current.request_id){
@@ -183,7 +206,7 @@ function timedCollectionIsFresh(){
 }
 setInterval(()=>{
  if(document.visibilityState!=="visible"||!S.current||S.busy||isForumChannel()||Date.now()<discordPauseUntil)return;
- const now=Date.now(),interval=timedCollectionIsFresh()?2500:10000;
+ const now=Date.now(),interval=timedCollectionIsFresh()?2000:7000;
  const backoff=liveReadFailures?Math.min(60000,10000*Math.pow(2,liveReadFailures)):0;
  if(now-lastLiveRead<Math.max(interval,backoff))return;
  lastLiveRead=now;
