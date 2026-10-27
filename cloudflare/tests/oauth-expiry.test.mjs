@@ -10,8 +10,8 @@ async function fixture() {
  const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(JSON.stringify(creds)));
  return {PUBLIC_BASE_URL:'https://example.test',DISCORD_CLIENT_SECRET:'synthetic-client',
   BUSHIN_OWNER_DISCORD_ID:owner,ENCRYPTION_KEY_BASE64:b64(bytes),
-  DB:{prepare(sql){assert.match(sql,/SELECT \* FROM oauth_access/);
-   return {bind(){return this},async first(){return {user_id:owner,scope:'identify guilds guilds.members.read',creds_encrypted:b64(iv)+'.'+b64(ciphertext)}}}}}};
+  DB:{prepare(sql){const isAccess=/SELECT \* FROM oauth_access/.test(sql);if(!isAccess)assert.match(sql,/bushin_project_state/);
+   return {bind(){return this},async first(){return isAccess?{user_id:owner,scope:'identify guilds guilds.members.read',creds_encrypted:b64(iv)+'.'+b64(ciphertext)}:null}}}}};
 }
 for (const status of [401,403,503]) test('upstream '+status+' preserves auth semantics without retry or disclosure',async t=>{
  let calls=0;

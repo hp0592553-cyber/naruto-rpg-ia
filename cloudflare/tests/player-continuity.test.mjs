@@ -13,12 +13,13 @@ function fixture(t,readChat=async()=>({read:true,messages:[]}),extra={}){
   let args;
   return {bind(...v){args=v;return this},async first(){return db.prepare(sql).get(...args)||null},async run(){return {meta:db.prepare(sql).run(...args)}}};
  }}};
+ env.BUSHIN_AI={async run(_model,args){const input=JSON.parse(args.messages[1].content);const next=input.commands?.find(c=>c.command==='/perfil ver')||input.commands?.[0];return {response:JSON.stringify(next?{command:next.command,channel_id:next.channel_id,options:{}}:{command:'',reason:'Sem ação verificada'})}}};
  const put=(key,value)=>db.prepare('INSERT OR REPLACE INTO bushin_project_state VALUES (?,?,?,?)').run(owner,key,JSON.stringify(value),Date.now());
  const get=key=>JSON.parse(db.prepare('SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?').get(owner,key)?.value_json||'null');
  put('discord2_service_heartbeat_v1',{at:Date.now(),version:4,instance_id:'test-runner'});
  put('discord2_catalog_cache_v7',{at:Date.now(),commands:[{application_id:bot,name:'perfil',options:[{type:1,name:'ver'}]}]});
  const baseUrl='https://example.test',ctx={me:{id:owner,membership:{member:true}}};
- const helpers={baseUrl,reply:(v,s)=>Response.json(v,{status:s}),seal:async x=>x,unseal:async x=>x,normalize:normalizeMessage,readChat,learn:async()=>({initial:false,evidence:[]}),...extra};
+ const helpers={baseUrl,reply:(v,s)=>Response.json(v,{status:s}),seal:async x=>x,unseal:async x=>x,normalize:normalizeMessage,readChat,learn:async()=>({initial:false,evidence:[]}),listChannels:async()=>({listed:true,visibility_filtered:true,channels:[{id:channel,name:'Comandos',type:0},{id:'1522249926845923339',name:'Campo Aberto',type:0}]}),...extra};
  const call=async data=>(await playerRoute(new Request(baseUrl+'/mobile/discord2/api/autoplay',data?{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify(data)}:{}),env,ctx,helpers)).json();
  const runner=async(path,data)=>(await commandServiceRunner(new Request(baseUrl+'/bridge/commands/'+path,{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify(data)}),env,helpers)).json();
  return {env,call,runner,put,get};
@@ -55,18 +56,18 @@ test('real SQLite: level target only completes from a correlated explicit profil
  r=await f.call({action:'tick',revision:r.state.revision});assert.equal(r.state.phase,'completed');assert.equal(r.state.snapshot.stats.level,20);
  const revision=r.state.revision;r=await f.call({action:'tick',revision});assert.equal(r.state.revision,revision);
 });
-test('permission loss refreshes membership and navigates to a returned allowed route without sending',async t=>{
+test('permission loss blocks without wandering into a random channel',async t=>{
  const route='999999999999999999';let lists=0;
  const f=fixture(t,async()=>({read:false,code:403}),{listChannels:async()=>{lists++;return {listed:true,visibility_filtered:true,channels:[{id:route,name:'Caminho · fixture',type:0}]}}});
  let r=await f.call();r=await f.call({action:'start',revision:r.state.revision});r=await f.call({action:'tick',revision:r.state.revision});
- assert.equal(lists,1);assert.equal(r.state.phase,'waiting');assert.equal(r.state.context_channel_id,route);assert.equal(r.state.site_action.channel_id,route);assert.equal(f.get('discord2_service_job_v1'),null);
+ assert.equal(lists,0);assert.equal(r.state.phase,'blocked');assert.equal(r.state.context_channel_id,channel);assert.equal(r.state.site_action||null,null);assert.equal(f.get('discord2_service_job_v1'),null);
 });
-test('an old arrival does not require a forest channel or repeat travel; consults the real available map',async t=>{
+test('an old arrival cannot force a map command into an unverified scene',async t=>{
  const f=fixture(t,async()=>({read:true,messages:[]}),{listChannels:async()=>({listed:true,visibility_filtered:true,channels:[{id:channel,name:'Comandos',type:0}]})});
+ f.env.BUSHIN_AI.run=async()=>({response:JSON.stringify({command:'',reason:'Sem cena verificada'})});
  let r=await f.call();r=await f.call({action:'start',revision:r.state.revision});
  const state=f.get('discord2_autoplay_v1');state.completed_keys=['/perfil ver','/nivel','/missoes minhas','/missoes ativas'];state.player_observations=[{command:'/viajar',channel_id:channel,text:'Viagem iniciada. Chegada automática <t:1700000000:F>'}];
  f.put('discord2_autoplay_v1',state);
  f.put('discord2_catalog_cache_v7',{at:Date.now(),commands:[{application_id:bot,name:'perfil',options:[{type:1,name:'ver'}]},{application_id:bot,name:'mapa'}]});
- r=await f.call({action:'tick',revision:state.revision});assert.equal(r.state.phase,'confirming');assert.equal(r.state.pending.action.command,'/mapa');assert.equal(r.state.pending.action.channel_id,channel);assert.equal(r.state.pending.action.arrival_check,1700000000000);
- const job=f.get('discord2_service_job_v1');assert.equal(job.request.command,'/mapa');
+ r=await f.call({action:'tick',revision:state.revision});assert.equal(r.state.phase,'waiting');assert.equal(r.state.pending,null);assert.equal(f.get('discord2_service_job_v1'),null);
 });

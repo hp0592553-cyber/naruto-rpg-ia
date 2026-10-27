@@ -47,7 +47,7 @@ test('fallback will not send status commands in RP chat and will not wander into
  const route=rulePlan({available,channels,contextChannel:FIELD,observations:[]});
  assert.equal(route.command,'/mapa');assert.equal(route.channel_id,FIELD);
  const after=rulePlan({available,channels,contextChannel:FIELD,observations:[{command:'/mapa',channel_id:COMMANDS,text:''}],visitedChannels:[FOREST]});
- assert.equal(after,null);
+ assert.equal(after.command,'/mapa');assert.equal(after.channel_id,FIELD);
 });
 test('Llama proposal is rejected when it tries /perfil ver inside scene channel',async()=>{
  const env={BUSHIN_AI:{async run(){return {response:JSON.stringify({command:'/perfil ver',channel_id:FIELD,options:{}})}}}};

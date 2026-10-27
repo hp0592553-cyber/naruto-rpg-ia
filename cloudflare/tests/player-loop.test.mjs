@@ -19,8 +19,9 @@ test('player queues a correlated query, stop prevents further actions, unconfirm
  rows.set('discord2_service_heartbeat_v1',JSON.stringify({at:Date.now(),version:4}));
   rows.set('discord2_catalog_cache_v7',JSON.stringify({at:Date.now(),commands:[{application_id:bot,name:'perfil',options:[{type:1,name:'ver'}]}]}));
   env.DISCORD_USER_TOKEN='synthetic-personal-credential-for-tests-only-123456789';
+ env.BUSHIN_AI={async run(_model,args){const input=JSON.parse(args.messages[1].content);const next=input.commands.find(x=>x.command==='/perfil ver');return {response:JSON.stringify(next?{command:next.command,channel_id:next.channel_id,options:{}}:{command:'',reason:'Sem comando verificado'})}}};
  const ctx={me:{id:owner,membership:{member:true}}},baseUrl='https://example.test';
- const helpers={reply:(v,s)=>Response.json(v,{status:s}),baseUrl,readChat:async()=>({read:true,messages:[]}),seal:async x=>x,unseal:async x=>x};
+ const helpers={reply:(v,s)=>Response.json(v,{status:s}),baseUrl,readChat:async()=>({read:true,messages:[]}),listChannels:async()=>({listed:true,visibility_filtered:true,channels:[{id:channel,name:'Comandos',type:0}]}),seal:async x=>x,unseal:async x=>x};
  const call=async data=>{let req=data?new Request(baseUrl+'/mobile/discord2/api/autoplay',{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify(data)}):new Request(baseUrl+'/mobile/discord2/api/autoplay');return (await playerRoute(req,env,ctx,helpers)).json()};
  let r=await call();r=await call({action:'start',revision:r.state.revision});
  r=await call({action:'tick',revision:r.state.revision});assert.equal(r.state.phase,'confirming');assert.equal(r.state.pending.action.command,'/perfil ver');
@@ -50,7 +51,7 @@ test('component envelope comes from own real response, rejects foreign messages 
 
 test('chat pipeline resolves the real author, reserves once and confirms delivery',async()=>{
  const rows=new Map();
- const env={BUSHIN_OWNER_DISCORD_ID:owner,DB:{prepare(sql){let a;return {bind(...v){a=v;return this},async first(){return rows.has(a[1])?{value_json:rows.get(a[1])}:null},async run(){let n=0;if(sql.startsWith('UPDATE')){if(rows.get(a[3])===a[4]){rows.set(a[3],a[0]);n=1}}else if(!sql.includes('IGNORE')||!rows.has(a[1])){rows.set(a[1],a[2]);n=1}return {meta:{changes:n}}}}}},BUSHIN_AI:{async run(){return {response:'Já cheguei na Floresta.'}}}};
+ const env={BUSHIN_OWNER_DISCORD_ID:owner,DB:{prepare(sql){let a;return {bind(...v){a=v;return this},async first(){return rows.has(a[1])?{value_json:rows.get(a[1])}:null},async run(){let n=0;if(sql.startsWith('UPDATE')){if(rows.get(a[3])===a[4]){rows.set(a[3],a[0]);n=1}}else if(!sql.includes('IGNORE')||!rows.has(a[1])){rows.set(a[1],a[2]);n=1}return {meta:{changes:n}}}}}},BUSHIN_AI:{async run(){return {response:JSON.stringify({text:'Já cheguei na Floresta.'})}}}};
  rows.set('discord2_service_heartbeat_v1',JSON.stringify({at:Date.now(),version:4}));
   const author='123456789012345678',mid='234567890123456789',sends=[];
   env.DISCORD_USER_TOKEN='synthetic-personal-credential-for-tests-only-123456789';
@@ -60,10 +61,7 @@ test('chat pipeline resolves the real author, reserves once and confirms deliver
  const ctx={me:{id:owner,membership:{member:true}}};
  const call=async data=>(await playerRoute(new Request(helpers.baseUrl+'/mobile/discord2/api/autoplay',data?{method:'POST',headers:{origin:helpers.baseUrl,'content-type':'application/json'},body:JSON.stringify(data)}:{}),env,ctx,helpers)).json();
  let r=await call();r=await call({action:'start',revision:r.state.revision,channel_id:channel});r=await call({action:'tick',revision:r.state.revision});
- assert.equal(sends.length,0);const planning=JSON.parse(rows.get('discord2_service_job_v1'));assert.equal(planning.request.command,'/agent-plan');
- planning.phase='finished';planning.confirmed=true;planning.sealed={brain:{provider:'opencode',model:'test-model',plan:{command:'/reply',options:{text:'Já cheguei na Floresta.'},channel_id:channel}}};rows.set('discord2_service_job_v1',JSON.stringify(planning));
- r=await call({action:'tick',revision:r.state.revision});assert.equal(r.state.brain.provider,'opencode');assert.equal(sends.length,0);
- r=await call({action:'tick',revision:r.state.revision});
+ assert.equal(r.state.brain.provider,'workers-ai');assert.equal(rows.has('discord2_service_job_v1'),false);
  assert.equal(sends.length,1);assert.equal(sends[0].reply_to,mid);assert.deepEqual(sends[0].mention_ids,[author]);assert.equal(sends[0].text,'<@'+author+'> Já cheguei na Floresta.');assert.equal(r.state.last_chat_reply.id,'345678901234567890');assert.deepEqual(r.state.reserved_reply_ids,[mid]);
  r=await call({action:'tick',revision:r.state.revision});assert.equal(sends.length,1);
 });
@@ -76,10 +74,10 @@ test('local rules only choose verified, unseen commands and can navigate',()=>{
  plan=rulePlan({available,observations:[{command:'/missoes minhas',channel_id:channel,text:''}],contextChannel:channel,channels,gate:{id:channel,name:'Portão de Konoha'}});
  assert.equal(plan.command,'/viajar');
  const nav=rulePlan({available:available.filter(x=>x.command!=='/viajar'),observations:[{command:'/missoes minhas',channel_id:channel,text:''},{command:'/mapa',channel_id:channel,text:''}],contextChannel:channel,channels});
- assert.equal(nav.command,'/navigate');assert.equal(nav.channel_id,'999999999999999999');
+ assert.equal(nav,null); // Sem navegação automática para um canal não verificado.
  assert.equal(rulePlan({available:available.filter(x=>x.command==='/missoes minhas'),observations:[{command:'/missoes minhas',channel_id:channel,text:''}],contextChannel:channel,channels:[channels[0]]}),null);
 });
-test('planner failure switches to local verified rules instead of blocking or inventing a result',async()=>{
+test('Workers AI indisponível não inventa comandos ou cria plano OpenCode',async()=>{
  const rows=new Map();
  const env={BUSHIN_OWNER_DISCORD_ID:owner,DISCORD_USER_TOKEN:'synthetic-personal-credential-for-tests-only-123456789',DB:{prepare(sql){let a;return {bind(...v){a=v;return this},async first(){return rows.has(a[1])?{value_json:rows.get(a[1])}:null},async run(){let n=0;if(sql.startsWith('UPDATE')){if(rows.get(a[3])===a[4]){rows.set(a[3],a[0]);n=1}}else if(!sql.includes('IGNORE')||!rows.has(a[1])){rows.set(a[1],a[2]);n=1}return {meta:{changes:n}}}}}}};
  rows.set('discord2_service_heartbeat_v1',JSON.stringify({at:Date.now(),version:4,instance_id:'test-runner'}));
@@ -92,17 +90,11 @@ test('planner failure switches to local verified rules instead of blocking or in
  rows.set('discord2_autoplay_v1',JSON.stringify({...r.state,player_observations:[{command:'/perfil ver',channel_id:channel,text:'Nível 10'}],completed_keys:['/perfil ver','/nivel','/missoes minhas','/missoes ativas']}));
  r=await call({action:'start',revision:r.state.revision});
  r=await call({action:'tick',revision:r.state.revision});assert.equal(r.state.phase,'waiting');
- const queued=JSON.parse(rows.get('discord2_service_job_v1'));assert.equal(queued.request.command,'/agent-plan');
- rows.set('discord2_service_job_v1',JSON.stringify({...queued,phase:'finished',confirmed:true,sealed:{brain:{error:'opencode_timeout'}}}));
- r=await call({action:'tick',revision:r.state.revision});
- assert.equal(r.state.brain.provider,'local-rules');assert.equal(r.planner.local,true);assert.equal(r.state.pending,null);
- r=await call({action:'tick',revision:r.state.revision});
- assert.equal(r.state.pending.action.command,'/mapa');assert.equal(r.state.phase,'confirming');
- const job=JSON.parse(rows.get('discord2_service_job_v1'));assert.equal(job.request.command,'/mapa');
+ assert.equal(r.state.brain.provider,'workers-ai');assert.ok(r.state.brain.error);assert.equal(rows.has('discord2_service_job_v1'),false);
 });
-test('when OpenCode is out of quota the Worker uses the Llama engine and still sends only catalog commands',async()=>{
+test('Workers AI escolhe comando do catálogo sem solicitar plano OpenCode',async()=>{
  const rows=new Map();
- const env={BUSHIN_OWNER_DISCORD_ID:owner,DISCORD_USER_TOKEN:'synthetic-personal-credential-for-tests-only-123456789',BUSHIN_AI:{async run(_model,args){const input=JSON.parse(args.messages[1].content);return {response:JSON.stringify({command:'/mapa',options:{},channel_id:input.context_channel_id,reason:'conferir o mapa real'})}}},DB:{prepare(sql){let a;return {bind(...v){a=v;return this},async first(){return rows.has(a[1])?{value_json:rows.get(a[1])}:null},async run(){let n=0;if(sql.startsWith('UPDATE')){if(rows.get(a[3])===a[4]){rows.set(a[3],a[0]);n=1}}else if(!sql.includes('IGNORE')||!rows.has(a[1])){rows.set(a[1],a[2]);n=1}return {meta:{changes:n}}}}}}};
+ const env={BUSHIN_OWNER_DISCORD_ID:owner,DISCORD_USER_TOKEN:'synthetic-personal-credential-for-tests-only-123456789',BUSHIN_AI:{async run(_model,args){const input=JSON.parse(args.messages[1].content);const next=input.commands.find(c=>c.command==='/perfil ver');return {response:JSON.stringify(next?{command:next.command,options:{},channel_id:next.channel_id,reason:'consulta confirmada'}:{command:'',reason:'Sem ação'})}}},DB:{prepare(sql){let a;return {bind(...v){a=v;return this},async first(){return rows.has(a[1])?{value_json:rows.get(a[1])}:null},async run(){let n=0;if(sql.startsWith('UPDATE')){if(rows.get(a[3])===a[4]){rows.set(a[3],a[0]);n=1}}else if(!sql.includes('IGNORE')||!rows.has(a[1])){rows.set(a[1],a[2]);n=1}return {meta:{changes:n}}}}}}};
  rows.set('discord2_service_heartbeat_v1',JSON.stringify({at:Date.now(),version:4,instance_id:'test-runner'}));
  rows.set('discord2_catalog_cache_v7',JSON.stringify({at:Date.now(),commands:[{application_id:bot,name:'perfil',options:[{type:1,name:'ver'}]},{application_id:bot,name:'mapa'}]}));
  const baseUrl='https://example.test',ctx={me:{id:owner,membership:{member:true}}};
@@ -111,12 +103,9 @@ test('when OpenCode is out of quota the Worker uses the Llama engine and still s
  let r=await call();
  rows.set('discord2_autoplay_v1',JSON.stringify({...r.state,player_observations:[{command:'/perfil ver',channel_id:channel,text:'Nível 10'}],completed_keys:['/perfil ver','/nivel','/missoes minhas','/missoes ativas']}));
  r=await call({action:'start',revision:r.state.revision});
- r=await call({action:'tick',revision:r.state.revision});assert.equal(r.state.phase,'waiting');
- const queued=JSON.parse(rows.get('discord2_service_job_v1'));
- rows.set('discord2_service_job_v1',JSON.stringify({...queued,phase:'finished',confirmed:true,sealed:{brain:{error:'opencode_timeout'}}}));
- r=await call({action:'tick',revision:r.state.revision});assert.equal(r.state.brain.provider,'local-rules');
  r=await call({action:'tick',revision:r.state.revision});
- assert.equal(r.state.pending.action.command,'/mapa');assert.equal(r.state.phase,'confirming');
+ assert.equal(r.state.phase,'confirming');assert.equal(r.state.pending.action.command,'/perfil ver');
  assert.equal(r.state.brain.provider,'workers-ai');assert.equal(r.planner.ai,true);assert.equal(r.planner.local,false);
- const job=JSON.parse(rows.get('discord2_service_job_v1'));assert.equal(job.request.command,'/mapa');assert.equal(job.request.channel_id,channel);
+ const job=JSON.parse(rows.get('discord2_service_job_v1'));assert.equal(job.request.command,'/perfil ver');assert.equal(job.request.channel_id,channel);
+
 });
