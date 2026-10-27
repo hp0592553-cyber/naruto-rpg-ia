@@ -10,7 +10,8 @@ export const AUTOPLAY_HTML=String.raw`
    <summary>Estado, resultados e bloqueios</summary>
   <textarea id="autoplayGoal">Jogar Naruto Project até o nível 20.</textarea>
   <button id="autoplayPause">Pausar</button><button id="autoplayResume">Continuar</button>
-  <button id="autoplayReview">Conferir</button><button id="autoplayRefresh">Atualizar</button>
+  <button id="autoplayReview">Conferir</button><button id="autoplayChannelCheck" type="button">📍 Conferir canal</button><button id="autoplayRefresh">Atualizar</button>
+   <div id="autoplayChannelStatus" class="hint" role="status" aria-live="polite">Canal ainda não verificado.</div>
   <div id="autoplayStats"></div><div id="autoplayAction"></div><div id="autoplayStages"></div>
   <div id="autoplayResult"></div><div id="autoplayPersistence"></div><div id="autoplayHistory"></div>
    <details id="autoplayMissing"><summary>Conexão e requisitos</summary><p id="autoplayIntegration"></p></details>
@@ -42,6 +43,10 @@ function renderAutoplay(data){
   else if(data.planner?.ai)E("autoplayStatus").textContent+=" · motor Llama no Worker (fallback da IA)";
   if(s.phase==="blocked"||s.phase==="uncertain"||s.phase==="failed")E("autoplayEvidence").open=true;
  const snapshot=s.snapshot,stats=snapshot?.stats||{},scalar=k=>stats[k]===null||stats[k]===undefined?"não confirmado":String(stats[k]),resource=k=>stats[k]?stats[k].current+" / "+stats[k].max:"não confirmado";
+ const channel=s.channel_check,activeName=S.channels.find(c=>c.id===s.context_channel_id)?.name||(channel?.channel_id===s.context_channel_id?channel.channel_name:null)||s.context_channel_id||'desconhecido';
+ E("autoplayChannelStatus").textContent=channel?.read_verified?
+  '📍 Canal verificado: '+channel.channel_name+' ('+channel.channel_id+'). '+channel.reason+' Comandos: '+(channel.command_channel_name||channel.command_channel_id||'não confirmado')+'. Mensagens lidas: '+(channel.read_messages??'?')+'.'
+  :'📍 Canal selecionado: '+activeName+'. Ainda sem verificação de leitura nesta sessão. Toque em Conferir canal.';
  E("autoplayStats").textContent="Nível: "+scalar("level")+" · XP: "+scalar("xp")+" · Vida: "+resource("hp")+" · Chakra: "+resource("chakra")+" · Energia: "+resource("energy")+"\nMissão: "+(snapshot?.mission?.label||snapshot?.mission?.status||"não confirmada")+" · Local: "+(snapshot?.location||"não confirmado");
  E("autoplayAction").textContent=s.pending?"Ação atual: "+s.pending.action.label+" · Canal "+s.pending.action.channel_id+" · ID "+s.pending.id:"Etapa: "+(s.cycle_stage||s.phase)+" · Ações confirmadas nesta ativação: "+(s.steps||0)+" / "+s.max_steps;
  const operation=s.pending||s.last_operation,st=operation?.stages;
@@ -68,6 +73,7 @@ function renderAutoplay(data){
  E("autoplayStart").disabled=autoplayControlBusy||autoplayStopBusy||active;E("autoplayResume").disabled=autoplayControlBusy||autoplayStopBusy||active||!s.run_id;
  E("autoplayPause").disabled=autoplayControlBusy||["stopped","paused"].includes(s.phase);E("autoplayStop").disabled=autoplayStopBusy||(s.phase==="stopped"&&!autoplayControlBusy);
  E("autoplayReview").disabled=autoplayControlBusy||!s.pending;
+ E("autoplayChannelCheck").disabled=autoplayControlBusy||autoplayStopBusy||!!s.pending;
 }
 async function refreshAutoplay(){
  try{const data=await req("/autoplay");renderAutoplay(data);return data;}
@@ -86,9 +92,18 @@ async function controlAutoplay(action,goal){
  if(autoplayControlBusy||autoplayStopBusy)return null;autoplayControlBusy=true;let failedNotice=null,requestedRevision=null;
  if(autoplayData)renderAutoplay(autoplayData);
  try{
-  const current=await refreshAutoplay();if(!current)throw Error("Estado indisponível");
+  let current=await refreshAutoplay();if(!current)throw Error("Estado indisponível");
+  if(["start","resume"].includes(action)){
+   if(!S.current)throw Error("Selecione primeiro um canal do Naruto Project.");
+   const checked=current.state.channel_check;
+   if(checked?.read_verified!==true||checked.requested_id!==S.current||Date.now()-Number(checked.checked_at||0)>120000){
+    current=await req("/autoplay",{method:"POST",body:JSON.stringify({action:"check_channel",revision:current.state.revision,channel_id:S.current})});
+    renderAutoplay(current);
+   }
+   if(current.state.channel_check?.read_verified!==true)throw Error("Não consegui verificar o canal acessível. Nada foi enviado.");
+  }
   requestedRevision=current.state.revision;
-  const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action,revision:current.state.revision,...(action==="start"||action==="resume"?{goal:goal||E("autoplayGoal").value,channel_id:S.current}:{})})});
+  const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action,revision:current.state.revision,...(action==="start"||action==="resume"?{goal:goal||E("autoplayGoal").value,channel_id:S.current}:action==="check_channel"?{channel_id:S.current}:{})})});
   renderAutoplay(data);autoplayPollingFailed=false;return data;
  }catch(e){const latest=await refreshAutoplay();if(!(latest?.state?.phase==="stopped"&&requestedRevision!==null&&latest.state.revision>requestedRevision))failedNotice="Pedido não concluído: "+e.message;return null;}
  finally{autoplayControlBusy=false;if(autoplayData)renderAutoplay(autoplayData);if(failedNotice)E("autoplayStatus").textContent=failedNotice;}
@@ -102,6 +117,7 @@ async function autoplayTick(){
  finally{autoplayTickBusy=false;}
 }
 for(const [id,action] of [["autoplayStart","start"],["autoplayPause","pause"],["autoplayResume","resume"],["autoplayStop","stop"],["autoplayReview","review"]])E(id).onclick=async()=>{const data=await controlAutoplay(action);if(data&&["start","resume"].includes(action))await autoplayTick();};
+E("autoplayChannelCheck").onclick=async()=>{await controlAutoplay("check_channel")};
 E("autoplayRefresh").onclick=async()=>{autoplayPollingFailed=false;await refreshAutoplay()};
 setInterval(autoplayTick,1000);
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")refreshAutoplay()});
