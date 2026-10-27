@@ -108,6 +108,10 @@ function renderAutoplay(data){
   else if(data.planner?.mode==="opencode")E("autoplayStatus").textContent+=" · IA OpenCode (plano recebido)";
   else if(data.planner?.local&&!/Discord ou executor indisponível|Discord temporarily unavailable|temporariamente indisponível/i.test(s.reason||""))E("autoplayStatus").textContent+=" · piloto local por regras (nenhum plano de IA confirmado)";
   else if(data.planner?.ai)E("autoplayStatus").textContent+=" · motor Llama no Worker (fallback da IA)";
+  if(data.integration?.executor_online===false&&["running","waiting","confirming"].includes(s.phase)){
+   E("autoplayStatus").textContent+=" · ⚠️ Executor offline: o GitHub fecha a sessão de testes em aproximadamente 60 s. A IA ainda pode analisar caixas; nenhum slash pode ser enviado até haver integração ativa.";
+   E("autoplayEvidence").open=true;
+  }
   if(s.phase==="blocked"||s.phase==="uncertain"||s.phase==="failed"||s.code==="discord_rate_limited")E("autoplayEvidence").open=true;
  const snapshot=s.snapshot,stats=snapshot?.stats||{},scalar=k=>stats[k]===null||stats[k]===undefined?"não confirmado":String(stats[k]),resource=k=>stats[k]?stats[k].current+" / "+stats[k].max:"não confirmado";
  const channel=s.channel_check,activeName=S.channels.find(c=>c.id===s.context_channel_id)?.name||(channel?.channel_id===s.context_channel_id?channel.channel_name:null)||s.context_channel_id||'desconhecido';
