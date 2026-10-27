@@ -28,6 +28,7 @@ import {autoplayRoute,scheduledAutoplay} from "./autoplay.mjs";
 import {playerRoute,playerChatDraftRoute} from "./player-loop.mjs";
 import {normalizeMessage} from "./message-normalizer.mjs";
 import {bushinAiNext} from "./discord2-ai.mjs";
+import {analyzeDiscordOptions} from "./discord2-options.mjs";
 import {codexBridgeMobile,codexBridgeAgent} from "./codex-bridge.mjs";
 import {bushinAutoRp} from "./discord2-autorp.mjs";
 import {searchHenriqueMessages,scanRpgChannels} from "./discord2-research.mjs";
@@ -997,6 +998,7 @@ export default {
           const data=await result.json();return result.ok?{ok:true,plan:{analysis:data.analysis,next_step:data.next_step,model:data.model}}:{ok:false,error:data.error};
         }});
         if(path==="/mobile/discord2/api/ai/next"&&req.method==="POST")return await bushinAiNext(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
+        if(path==="/mobile/discord2/api/ai/options"&&req.method==="POST")return await analyzeDiscordOptions(req,env,ctx,{reply,baseUrl:base(env),readChat:personalCall});
         if(path==="/mobile/discord2/api/ai/autorp"){
           const notice="RP automático por conta pessoal desativado. Aguardando integração autorizada do jogo.";
           return reply(req.method==="GET"?{state:"blocked",enabled:false,last_result:notice}:{state:"blocked",enabled:false,error:notice},req.method==="GET"?200:409,{"cache-control":"no-store"});
