@@ -471,6 +471,15 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
       if(outcome.plan)selected=outcome.plan;else aiError=outcome.error||'no_action';
      }
      if(!selected){workersAiError=aiError}
+     // When the Llama cannot choose, permit a single catalog-verified read-only
+     // observation. Never fall back to travel, collection, fighting or buttons.
+     if(!selected){
+      const observation=local();
+      const readOnlyFallback=/^\\/(?:perfil (?:ver|nivel|atributos|cooldowns)|nivel|missoes (?:minhas|ativas|diarias|semanais)|mapa)$/;
+      if(observation&&readOnlyFallback.test(observation.command)&&!context.some(o=>o.command===observation.command&&String(o.channel_id||CHANNEL)===String(observation.channel_id))){
+       selected={...observation,provider:'local-rules',model:'catalog-v2',reason:'Consulta informativa verificada após falha do Llama; sem repetir comando observado.'};
+      }
+     }
      if(!selected){const next=await commit(d=>{d.phase='waiting';d.code=null;d.brain={provider:'workers-ai',model:WORKERS_AI,error:aiError||'no_verified_action'};d.workers_ai_error=aiError||'no_verified_action';d.workers_ai_retry_at=Date.now()+45000;d.reason='Llama: '+(aiError||'sem ação verificada')+'. Aguardando novas informações do jogo sem repetir ações incertas.';d.next_tick_at=Date.now()+9000;return d});return reply(view(next.state),200,HEAD);}
     }
     else{
