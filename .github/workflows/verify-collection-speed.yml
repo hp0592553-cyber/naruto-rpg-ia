@@ -1,0 +1,23 @@
+name: Bushin Collection Speed Checks
+on:
+  push:
+    branches: [fix/bushin-fast-collect-panel-20261027]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax
+        run: |
+          node --check cloudflare/mobile-panel-fixes.mjs
+          node --check cloudflare/autoplay-ui.mjs
+          node --check cloudflare/player-loop.mjs
+      - name: Focused minigame and channel checks
+        run: timeout 90s node --test cloudflare/tests/fast-collection.test.mjs cloudflare/tests/player-channel.test.mjs
