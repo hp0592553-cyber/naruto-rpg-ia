@@ -68,8 +68,9 @@ test('AI suggested combat cannot be executed even with an otherwise valid catalo
  assert.equal(data.sent,false);
 });
 
-test('AI actually invokes the model in HTML autoplay without an unverified character snapshot',async t=>{
+test('AI actually invokes the model in HTML autoplay with verified owner evidence but no saved character',async t=>{
  const f=fixture('/perfil ver');
+ f.helpers.personalCall=async(_env,_tool,args)=>({read:true,messages:args.channel_id===ch?[{id:'1563883377600233727',channel_id:ch,author_id:user,content:'Quero consultar a minha ficha para começar a jogar.'}]:[]});
  const calls=[];
  f.env.BUSHIN_AI.run=async(model,args)=>{
   calls.push({model,args});
@@ -92,6 +93,7 @@ test('AI actually invokes the model in HTML autoplay without an unverified chara
  assert.equal(calls.length,1,'the AI model must run instead of returning a fixed suggestion');
  assert.equal(data.model_invoked,true);
  assert.equal(data.character_confirmed,false);
+ assert.equal(data.read_messages,1);
  assert.match(data.analysis,/Falta ficha confirmada/);
  assert.equal(data.next_action.command,'/perfil ver');
  assert.equal(data.executed_command,false);
