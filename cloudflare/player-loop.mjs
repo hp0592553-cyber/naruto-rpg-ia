@@ -120,8 +120,11 @@ export async function workersAiPlan(env,{available=[],observations=[],channels=[
 export function reconcileUnconfirmedPlayerResult(state,pending,result){
  if(!pending?.id||result?.request_id!==pending.id||result?.command!==pending.action?.command)throw Error('Resultado não corresponde à ação pendente. Nenhum reenvio.');
  if(!['finished','stopped','uncertain','unknown'].includes(result.state)||result.confirmed&&result.response)throw Error('Operação não está pronta para reconciliação.');
- state.pending=null;state.plan_pending=null;state.refresh_observation=true;
  const definitelyUnsent=result.state==='stopped';
+ // Preserve the exact operation ID and evidence, even after clearing pending.
+ recordAutoplay(state,definitelyUnsent?'not_sent':'unconfirmed',pending.action.command);
+ state.last_operation={...pending,stages:{...pending.stages,send_attempted:definitelyUnsent?false:pending.stages?.send_attempted??null,response_captured:false,game_state_confirmed:false},terminal_state:result.state,confirmed:false};
+ state.pending=null;state.plan_pending=null;state.refresh_observation=true;
  if(!definitelyUnsent){
   state.completed_keys=[...new Set([...(state.completed_keys||[]),pending.action.command])].slice(-100);
   state.uncertain_actions=(state.uncertain_actions||[]).concat({...pending.action,operation_id:pending.id}).slice(-100);
@@ -130,7 +133,7 @@ export function reconcileUnconfirmedPlayerResult(state,pending,result){
  state.phase='paused';state.run_id=null;state.lease=null;state.next_tick_at=0;
  state.code=definitelyUnsent?'operation_not_sent':'unconfirmed_result';
  state.reason=definitelyUnsent?'O executor confirmou que a ação foi parada antes do envio. Pode escolher como continuar.':'A operação '+pending.action.command+' terminou sem resultado confirmado. Registrei a tentativa como incerta e não vou repeti-la automaticamente.';
- return recordAutoplay(state,definitelyUnsent?'not_sent':'unconfirmed',pending.action.command);
+ return state;
 }
 
 export function confirmPlayerResult(state,pending,result,owner){
