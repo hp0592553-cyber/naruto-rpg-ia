@@ -5,11 +5,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'ci (testes), diagnostico, jogar, comando, servico, login ou relay'
+        description: 'publicar (testa e publica), ci (so testes), diagnostico, jogar, comando, servico, login ou relay'
         required: true
-        default: ci
+        default: publicar
         type: choice
-        options: [ci, diagnostico, jogar, comando, servico, login, relay]
+        options: [ci, publicar, diagnostico, jogar, comando, servico, login, relay]
       request_id:
         description: 'ID do pedido correlacionado do Discord 2'
         required: false
@@ -21,7 +21,7 @@ on:
         type: string
         default: ''
       publish:
-        description: 'Para publicar, digite PUBLICAR; deixe vazio para apenas testar'
+        description: 'Opcional: legado ci + PUBLICAR. Para publicar, escolha mode publicar'
         required: false
         default: ''
         type: string
@@ -56,7 +56,7 @@ concurrency:
 
 jobs:
   validate:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode == 'ci' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'ci' || inputs.mode == 'publicar') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -181,7 +181,7 @@ jobs:
   deploy:
     name: Publicar somente apos validacao completa
     needs: validate
-    if: ${{ github.ref == 'refs/heads/Projeto' && ((github.event_name == 'workflow_dispatch' && inputs.mode == 'ci' && inputs.publish == 'PUBLICAR') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bushin-publicar-validado]'))) }}
+    if: ${{ github.ref == 'refs/heads/Projeto' && ((github.event_name == 'workflow_dispatch' && (inputs.mode == 'publicar' || (inputs.mode == 'ci' && inputs.publish == 'PUBLICAR'))) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bushin-publicar-validado]'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
