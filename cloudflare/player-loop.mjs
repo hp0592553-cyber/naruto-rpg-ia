@@ -224,7 +224,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   return reply(view(next.state),200,HEAD);
  }
  if(action==='stop'||action==='pause'){
-   const next=await update(d=>{d.phase=action==='pause'?'paused':'stopped';d.code=null;d.reason=(action==='pause'?'Pausado.':'Parado.')+' Uma ação já recebida pelo jogo pode terminar.';d.run_id=null;d.lease=null;d.plan_pending=null;return d});
+   const next=await update(d=>{d.phase=action==='pause'?'paused':'stopped';d.code=null;d.reason=(action==='pause'?'Pausado.':'Parado.')+' Uma ação já recebida pelo jogo pode terminar.';d.run_id=null;d.lease=null;d.plan_pending=null;d.next_tick_at=0;return d});
   try{await service({action:'stop'})}catch{}
   return reply(view(next.state),200,HEAD);
  }
@@ -353,7 +353,21 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
    const next=await commit(d=>{d.steps++;d.reason='Resposta enviada no chat com marcação do autor.';d.plan_decision=null;d.reply_plan_target=null;d.last_chat_reply={id:sent.message_id,channel_id:contextChannel,text};d.next_tick_at=Date.now()+4000;recordAutoplay(d,'chat_sent','Resposta à mensagem '+target.id)});return reply(view(next.state),200,HEAD);
   }
   const registry=await personalInspectCommand(env,{channel_id:CHANNEL,command:'/perfil ver'},ctx);
-  if(!registry.catalog_verified||registry.stale)throw Error('Catálogo de comandos não confirmado.');
+  if(!registry.catalog_verified||registry.stale){
+   const reason=String(registry.reason||registry.note||'Catálogo de comandos ainda não confirmado.').slice(0,220);
+   const limited=Number(registry.code)===429||/429|limite|rate.limit|aguarde/i.test(reason);
+   const hinted=Number(registry.retry_after_seconds)||Number(reason.match(/Aguarde\s+(\d+)\s+segundos/i)?.[1])||0;
+   const wait=limited?Math.max(30,Math.min(900,hinted||90)):600;
+   const next=await commit(d=>{
+    d.phase='waiting';
+    d.code=limited?'discord_rate_limited':'catalog_unverified';
+    d.reason=limited?'Catálogo indisponível durante limite 429: '+reason+' Nenhum comando enviado.':'Catálogo de comandos não confirmado: '+reason+' Aguardando nova verificação sem inventar comandos.';
+    d.next_tick_at=Date.now()+wait*1000;
+    recordAutoplay(d,'catalog_wait',(limited?'429 · ':'not_verified · ')+reason);
+    return d;
+   });
+   return reply(view(next.state),200,HEAD);
+  }
   const available=playerCommands(registry.commands).filter(x=>!saved.state.completed_keys.includes(x.command)||['/viajar','/acao coletar','/mapa'].includes(x.command));
   const currentResponse=await (await commandServiceMobile(new Request(baseUrl+'/mobile/discord2/api/ai/opencode'),env,ctx,{unseal,baseUrl})).json();
   const stored=saved.state.last_result;
