@@ -102,7 +102,9 @@ function renderAutoplay(data){
  autoplayData=data;updateCollectionStatus();autoplayRenderLogs();updateAutoplayCountdown();const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
   const missing=(data.integration?.missing||[]).join("; ");
   E("autoplayStatus").textContent=data.integration?.configured===false?"Execução bloqueada: "+(missing||s.reason||"adaptador autorizado indisponível"):(s.phase==="stopped"?"Parado.":(labels[s.phase]||s.phase)+" · "+(s.reason||""));
-  if(data.planner?.mode==="opencode-pending")E("autoplayStatus").textContent+=" · OpenCode preparando plano (nenhuma ação confirmada ainda)";
+  if(data.planner?.mode==="opencode-pending"&&data.planner_job?.state==="finished")E("autoplayStatus").textContent+=" · OpenCode terminou; conferindo a decisão salva (nenhuma ação enviada ainda)";
+  else if(data.planner?.mode==="opencode-pending"&&data.integration?.executor_online===false)E("autoplayStatus").textContent+=" · execução suspensa: executor offline; recarregue o painel para retomar";
+  else if(data.planner?.mode==="opencode-pending")E("autoplayStatus").textContent+=" · OpenCode preparando plano (nenhuma ação confirmada ainda)";
   else if(data.planner?.mode==="opencode")E("autoplayStatus").textContent+=" · IA OpenCode (plano recebido)";
   else if(data.planner?.local&&!/Discord ou executor indisponível|Discord temporarily unavailable|temporariamente indisponível/i.test(s.reason||""))E("autoplayStatus").textContent+=" · piloto local por regras (nenhum plano de IA confirmado)";
   else if(data.planner?.ai)E("autoplayStatus").textContent+=" · motor Llama no Worker (fallback da IA)";
@@ -211,7 +213,7 @@ E("autoplayRefresh").onclick=async()=>{autoplayPollingFailed=false;await refresh
 setInterval(autoplayTick,1000);
 setInterval(updateCollectionStatus,1000);
 setInterval(updateAutoplayCountdown,1000);
-document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")refreshAutoplay()});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"){autoplayPollingFailed=false;refreshAutoplay().then(()=>autoplayTick());}});
 refreshAutoplay();
 `;
 export const AUTOPLAY_INTENT_JS=String.raw`
