@@ -20,6 +20,15 @@ export function fixMobileHtml(html){
 .playerEvidence button{margin:4px 4px 4px 0}
 .playerEvidence [id^="autoplay"]{white-space:pre-wrap}
  /* The original CSS hid #gamePanel even when opened. */
+.bushinAiChoices{margin:12px 0;padding:12px;border:1px solid #526596;border-radius:12px;background:#252d42;max-width:100%;white-space:normal!important}
+.bushinAiChoices .gameAskAi{display:block;width:100%;min-height:44px;margin:0 0 8px;background:#4857bd;color:#fff;border-radius:10px;cursor:pointer}
+.bushinAiChoices .gameAskAi:disabled{opacity:.7;cursor:wait}
+.bushinAiChoices .aiChoicesResult{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;font-size:14px;color:#edf2ff}
+.bushinAiChoices .aiChoicesResult:empty{display:none}
+.bushinAiChoices strong{display:block;margin:8px 0 3px}
+.bushinAiChoices ol{padding-left:20px;margin:6px 0}
+.bushinAiChoices li{margin:6px 0}
+.bushinAiChoices .aiChoicesCaution{display:block;margin-top:8px;color:#b5c5e5;font-size:12px}
  #gamePanel:not([hidden]){display:block!important;max-height:43dvh;overflow:auto;overscroll-behavior:contain}
  #gameToolbox:not([hidden]),#commandResponse:not([hidden]){display:block!important}
  #gamePanel .gameAction,.msg .gameAction{min-height:44px;touch-action:manipulation;cursor:pointer}
@@ -178,6 +187,17 @@ async function send(){
    'if(liveOwnResponse(m)&&Number(c.style)!==5){appendOwnGameControl(parent,m,c);drawn++;return;}');
   js=replaceOnce(js,'note.textContent=m.own_response?"Toque nas opções desta caixa para agir no jogo."',
    'note.textContent=liveOwnResponse(m)?"Toque nas opções desta caixa para agir no jogo."');
+ // Add real inline AI option cards instead of a generic question that loses message IDs.
+ js=replaceSection(js,'const ask=document.createElement("button");ask.className="gameAskAi";','const note=document.createElement("div");',()=> 'appendAiOptionCard(parent,m);\\n ');
+ js=replaceOnce(js,'if(liveOwnResponse(m)){for(const c of m.controls||[])appendOwnGameControl(parent,m,c);return;}',
+   'if(liveOwnResponse(m)){for(const c of m.controls||[])appendOwnGameControl(parent,m,c);appendAiOptionCard(parent,m);return;}');
+ js=replaceOnce(js,'root.append(note);host.append(root);return true;',
+   'root.append(note);host.append(root);appendAiOptionCard(host,m);return true;');
+ js=replaceOnce(js,'if(!controls.length)return;',
+   'if(!controls.length){appendAiOptionCard(host,response);host.hidden=false;return;}');
+ js=replaceOnce(js,'for(const c of controls)appendOwnGameControl(group,response,c);\\n host.hidden=false;',
+   'for(const c of controls)appendOwnGameControl(group,response,c);\\n appendAiOptionCard(host,response);\\n host.hidden=false;');
+
 
  js=replaceSection(js,'const slashProgressKey=','async function sendSelectedSlash(',part=>{
   part=replaceOnce(part,'const r=await req("/ai/opencode");','const r=await req("/ai/opencode"+(current.request_id?"?request_id="+encodeURIComponent(current.request_id):""));');
