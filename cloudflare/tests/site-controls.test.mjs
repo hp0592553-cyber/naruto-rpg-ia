@@ -27,7 +27,7 @@ test('site navigation follows a new allowed action once and never moves while st
 });
 test('Stop submits immediately while Start is waiting for a status GET',async()=>{
  const requests=[],nodes=new Map();let release;
- const current={state:{revision:1,phase:'stopped'}};
+ const current={state:{revision:1,phase:'stopped',channel_check:{read_verified:true,requested_id:'1520114348079583263',checked_at:Date.now()}}};
  const c=vm.createContext({autoplayControlBusy:false,autoplayStopBusy:false,autoplayData:current,autoplayPollingFailed:false,autoplayTransientRetryAt:0,autoplayLogError(){},S:{current:'1520114348079583263'},
   E:id=>{if(!nodes.has(id))nodes.set(id,{value:''});return nodes.get(id)},renderAutoplay(){},
   refreshAutoplay:()=>new Promise(resolve=>{release=resolve}),
@@ -42,7 +42,7 @@ test('Stop submits immediately while Start is waiting for a status GET',async()=
 });
 test('a late Start conflict does not replace a newer confirmed Stop with an error notice',async()=>{
  const nodes=new Map();let release,startEntered;const pending=new Promise(resolve=>{release=resolve}),entered=new Promise(resolve=>{startEntered=resolve});
- let current={state:{revision:0,phase:'stopped'}};
+ let current={state:{revision:0,phase:'stopped',channel_check:{read_verified:true,requested_id:'1520114348079583263',checked_at:Date.now()}}};
  const E=id=>{if(!nodes.has(id))nodes.set(id,{value:''});return nodes.get(id)};
  const c=vm.createContext({autoplayControlBusy:false,autoplayStopBusy:false,autoplayData:current,autoplayPollingFailed:false,autoplayTransientRetryAt:0,autoplayLogError(){},S:{current:'1520114348079583263'},E,
   renderAutoplay:()=>{E('autoplayStatus').textContent='Parado.'},refreshAutoplay:async()=>current,
