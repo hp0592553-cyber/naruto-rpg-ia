@@ -207,9 +207,31 @@ async function discordToken(env,data){
   if(!validScope(String(j.scope||"")))throw oauthError("invalid_scope","Discord did not grant required permissions.");
   return {access:j.access_token,refresh:j.refresh_token,expires:now()+j.expires_in*1000,scope:j.scope};
 }
-async function discordFetch(token,path){
+// OAuth 429 backoff shared between Worker isolates (no token stored in D1).
+const OAUTH_COOLDOWN_KEY="discord2_oauth_backoff_v1";
+let oauthLocalPauseUntil=0;
+async function pauseDiscordOAuthIfNeeded(env){
+  if(Date.now()<oauthLocalPauseUntil)throw oauthError("discord_rate_limited","Discord em espera OAuth (HTTP 429). Aguarde "+Math.ceil((oauthLocalPauseUntil-Date.now())/1000)+" segundos antes de tentar novamente.",429);
+  const row=await env.DB.prepare("SELECT value_json FROM bushin_project_state WHERE owner_id=? AND key=?")
+    .bind(String(env.BUSHIN_OWNER_DISCORD_ID),OAUTH_COOLDOWN_KEY).first();
+  if(!row)return;
+  let data;try{data=JSON.parse(row.value_json)}catch{data={}}
+  const until=Number(data?.until)||0;
+  oauthLocalPauseUntil=Math.max(oauthLocalPauseUntil,until);
+  if(until>Date.now())throw oauthError("discord_rate_limited","Discord em espera OAuth (HTTP 429, "+String(data.path||"API")+"). Aguarde "+Math.ceil((until-Date.now())/1000)+" segundos antes de tentar novamente.",429);
+}
+async function rememberDiscordOAuth429(env,seconds,path){
+  const until=Date.now()+seconds*1000;
+  oauthLocalPauseUntil=Math.max(oauthLocalPauseUntil,until);
+  const stamp=Date.now();
+  const json=JSON.stringify({until,path:String(path).slice(0,110),status:429});
+  await env.DB.prepare("INSERT INTO bushin_project_state (owner_id,key,value_json,updated_at) VALUES (?,?,?,?) ON CONFLICT(owner_id,key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at WHERE CAST(json_extract(bushin_project_state.value_json,'$.until') AS INTEGER) < CAST(json_extract(excluded.value_json,'$.until') AS INTEGER)")
+    .bind(String(env.BUSHIN_OWNER_DISCORD_ID),OAUTH_COOLDOWN_KEY,json,stamp).run();
+}
+async function discordFetch(token,path,env){
   if(!["/users/@me","/users/@me/guilds","/users/@me/guilds/"+NARUTO_GUILD_ID+"/member"].includes(path))
     throw Error("Unapproved Discord API endpoint");
+  if(env)await pauseDiscordOAuthIfNeeded(env);
   const res=await fetch(DISCORD+path,{headers:{
     authorization:"Bearer "+token,accept:"application/json"
   },signal:AbortSignal.timeout(10000)});
@@ -217,18 +239,22 @@ async function discordFetch(token,path){
   if(res.status===404)return null;
   if(res.status===403)throw oauthError("insufficient_scope","Missing Discord permission.",403);
   if(res.status===429){
-    const retry=Number(res.headers.get("retry-after"));
-    const seconds=Number.isFinite(retry)&&retry>0?Math.max(1,Math.min(900,Math.ceil(retry))):60;
-    throw oauthError("discord_rate_limited","Discord aplicou limite HTTP 429. Aguarde "+seconds+" segundos antes de tentar novamente.",429);
+    const header=Number.parseFloat(res.headers.get("retry-after")||res.headers.get("x-ratelimit-reset-after")||"");
+    let payloadSeconds=0;
+    try{const body=await res.json();payloadSeconds=Number(body?.retry_after)||0}catch{}
+    const raw=Number.isFinite(header)&&header>0?header:payloadSeconds>0?payloadSeconds:60;
+    const seconds=Math.max(1,Math.min(900,Math.ceil(raw)));
+    if(env)await rememberDiscordOAuth429(env,seconds,path);
+    throw oauthError("discord_rate_limited","Discord aplicou limite HTTP 429 em "+path+". Aguarde "+seconds+" segundos antes de tentar novamente.",429);
   }
-  if(!res.ok)throw oauthError("temporarily_unavailable","Discord temporariamente indisponível (HTTP "+res.status+").",503);
+  if(!res.ok)throw oauthError("temporarily_unavailable","Discord temporariamente indisponível (HTTP "+res.status+" em "+path+").",503);
   return res.json();
 }
 async function verified(env,creds){
-  const profile=await discordFetch(creds.access,"/users/@me");
+  const profile=await discordFetch(creds.access,"/users/@me",env);
   if(!profile || profile.id!==env.BUSHIN_OWNER_DISCORD_ID)
     throw oauthError("access_denied","This Discord account is not the Bushin owner.",403);
-  const membership=await discordFetch(creds.access,"/users/@me/guilds/"+NARUTO_GUILD_ID+"/member");
+  const membership=await discordFetch(creds.access,"/users/@me/guilds/"+NARUTO_GUILD_ID+"/member",env);
   if(!membership)throw oauthError("access_denied","Discord account is not in Naruto Project RP.",403);
   return {id:profile.id,username:String(profile.username||""),
     display_name:String(profile.global_name||profile.username||""),
@@ -899,8 +925,8 @@ export default {
           const auth=await unseal(row.creds_encrypted,env);
           if(auth.expires<=now()+30000)return reply({state:"unauthorized",error:"Login Discord expirado. Entre novamente pelo Bushin."},401,headers);
           const [member,guilds]=await Promise.all([
-            discordFetch(auth.access,"/users/@me/guilds/"+NARUTO_GUILD_ID+"/member"),
-            discordFetch(auth.access,"/users/@me/guilds")
+            discordFetch(auth.access,"/users/@me/guilds/"+NARUTO_GUILD_ID+"/member",env),
+            discordFetch(auth.access,"/users/@me/guilds",env)
           ]);
           const guild=Array.isArray(guilds)?guilds.find(g=>String(g.id)===NARUTO_GUILD_ID):null;
           const basePermissions=guild?.permissions??guild?.permissions_new;
@@ -934,8 +960,8 @@ export default {
           const auth=await unseal(row.creds_encrypted,env);
           if(auth.expires<=now()+30000)return {listed:false,reason:"Login Discord expirado. Entre novamente pelo Bushin."};
           const [member,guilds]=await Promise.all([
-            discordFetch(auth.access,"/users/@me/guilds/"+NARUTO_GUILD_ID+"/member"),
-            discordFetch(auth.access,"/users/@me/guilds")
+            discordFetch(auth.access,"/users/@me/guilds/"+NARUTO_GUILD_ID+"/member",env),
+            discordFetch(auth.access,"/users/@me/guilds",env)
           ]);
           const guild=Array.isArray(guilds)?guilds.find(g=>String(g.id)===NARUTO_GUILD_ID):null;
           const permissions=guild?.permissions??guild?.permissions_new;
