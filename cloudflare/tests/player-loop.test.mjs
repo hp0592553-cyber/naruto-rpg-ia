@@ -109,3 +109,21 @@ test('Workers AI escolhe comando do catálogo sem solicitar plano OpenCode',asyn
  const job=JSON.parse(rows.get('discord2_service_job_v1'));assert.equal(job.request.command,'/perfil ver');assert.equal(job.request.channel_id,channel);
 
 });
+
+test('Llama repairs an invented command using only verified catalog entries',async()=>{
+ const {workersAiPlan}=await import('../player-loop.mjs');
+ let calls=0;
+ const env={BUSHIN_AI:{async run(){calls++;return {response:JSON.stringify(calls===1?{command:'/inventado',options:{}}:{command:'/perfil nivel',options:{},channel_id:channel})}}}};
+ const outcome=await workersAiPlan(env,{available:[{command:'/perfil nivel',options:[]}],channels:[{id:channel,name:'Comandos',type:0}],contextChannel:channel});
+ assert.equal(outcome.plan?.command,'/perfil nivel',JSON.stringify(outcome));
+ assert.equal(calls,2);
+});
+test('Llama does not execute a second invented command after repair attempt',async()=>{
+ const {workersAiPlan}=await import('../player-loop.mjs');
+ let calls=0;
+ const env={BUSHIN_AI:{async run(){calls++;return {response:JSON.stringify({command:'/inventado',options:{}})}}}};
+ const outcome=await workersAiPlan(env,{available:[{command:'/perfil nivel',options:[]}],channels:[{id:channel,name:'Comandos',type:0}],contextChannel:channel});
+ assert.equal(outcome.plan,undefined);
+ assert.equal(outcome.error,'command_not_allowed');
+ assert.equal(calls,2);
+});
