@@ -8,11 +8,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Selecione Projeto: ci, diagnostico, jogar, comando, servico, login ou relay'
+        description: 'Selecione Projeto: publicar, ci, diagnostico, jogar, comando, servico, login ou relay'
         required: true
-        default: ci
+        default: publicar
         type: choice
-        options: [ci, diagnostico, jogar, comando, servico, login, relay]
+        options: [ci, publicar, diagnostico, jogar, comando, servico, login, relay]
       request_id:
         description: 'ID do pedido correlacionado do Discord 2'
         required: false
@@ -24,7 +24,7 @@ on:
         type: string
         default: ''
       publish:
-        description: 'Para publicar na branch Projeto: PUBLICAR'
+        description: 'Opcional: modo ci + PUBLICAR; para publicar escolha mode publicar'
         required: false
         default: ''
         type: string
