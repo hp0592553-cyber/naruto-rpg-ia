@@ -42,7 +42,13 @@ export function fixMobileJs(js){
  js=replaceSection(js,'async function refresh(','async function older(){',part=>{
   part=replaceOnce(part,'?limit=12','?limit=50');
   part=replaceOnce(part,'const recent=(d.messages||[]).slice().reverse();','if(d.read!==true||!Array.isArray(d.messages))throw Error(d.reason||"A API não confirmou a leitura deste canal.");\n  const recent=d.messages.slice().reverse();');
+  part=replaceOnce(part,'const updates=new Map(recent.map(m=>[String(m.id),m]));',String.raw`const updates=new Map(recent.map(m=>[String(m.id),m]));
+   const previous=new Map(S.messages.map(m=>[String(m.id),m]));
+   const changed=recent.some(m=>{const old=previous.get(String(m.id));return !!old&&(old.edited_timestamp!==m.edited_timestamp||String(old.normalized_text||old.content||"")!==String(m.normalized_text||m.content||"")||JSON.stringify(old.components||[])!==JSON.stringify(m.components||[]));});`);
+  part=replaceOnce(part,'if(newOnes.length)followIncoming();\n   render(nearBottom?"bottom":"keep");','if(newOnes.length)followIncoming();\n   if(newOnes.length||changed)render(nearBottom?"bottom":"keep");');
+  part=replaceOnce(part,'autocompleteMention();','liveReadFailures=0;autocompleteMention();');
   part=replaceOnce(part,'}catch(e){if(!quiet&&!e.rateLimited)', '}catch(e){if(seq!==S.seq||channel!==S.current)return;if(!quiet&&!e.rateLimited)');
+  part=replaceOnce(part,'}catch(e){if(seq!==S.seq||channel!==S.current)return;if(!quiet&&!e.rateLimited)', '}catch(e){if(seq!==S.seq||channel!==S.current)return;liveReadFailures=Math.min(5,liveReadFailures+1);if(!quiet&&!e.rateLimited)');
   return replaceOnce(part,'finally{S.busy=false}', 'finally{if(seq===S.seq&&channel===S.current)S.busy=false}');
  });
  // Increase history pages from 12 to 50; retain the cursor and prevent out-of-order channel mixing.
@@ -164,6 +170,25 @@ async function send(){
   part=replaceOnce(part,'slashProgress={command,started,pending:true};','slashProgress={command,started,pending:true,request_id:requestId||null,channel_id:channelId||null};');
   return replaceOnce(part,'startSlashProgress(saved.command,saved.started);','startSlashProgress(saved.command,saved.started,saved.request_id,saved.channel_id);');
  });
+ // Poll a recent timing-sensitive game box faster, but never exceed Discord's 429 pause.
+ js=replaceOnce(js,'setInterval(()=>{if(document.visibilityState==="visible")refresh(true)},30000);',String.raw`let liveReadFailures=0,lastLiveRead=Date.now();
+function timedCollectionIsFresh(){
+ const game=autoplayData?.state?.last_result?.response;
+ const recent=S.messages.slice(-5).concat(game&&game.channel_id===S.current?[game]:[]);
+ return recent.some(m=>{
+  const ts=Date.parse(m.timestamp||"");if(!Number.isFinite(ts))return false;
+  const age=Date.now()-ts;if(age<0||age>26000)return false;
+  return /(?:coleta:\s*como funciona|minijogo|quatro palavras|sequ[eê]ncia usando os bot[oõ]es)/i.test(String(m.normalized_text||m.content||""));
+ });
+}
+setInterval(()=>{
+ if(document.visibilityState!=="visible"||!S.current||S.busy||isForumChannel()||Date.now()<discordPauseUntil)return;
+ const now=Date.now(),interval=timedCollectionIsFresh()?2500:10000;
+ const backoff=liveReadFailures?Math.min(60000,10000*Math.pow(2,liveReadFailures)):0;
+ if(now-lastLiveRead<Math.max(interval,backoff))return;
+ lastLiveRead=now;
+ void refresh(true);
+},1000);`);
  // Authorized adapter controls must never fall back to the personal /component executor.
  js=replaceOnce(js,'if(![2,3].includes(Number(c.type))||!c.custom_id||c.url)return;',String.raw`if(![2,3].includes(Number(c.type))||!c.custom_id||c.url)return;
  if(response.authorized_game===true){const note=document.createElement("p");note.className="hint";note.textContent=(c.label||c.placeholder||"Opção do jogo")+": execução somente pelas ações autorizadas do adaptador; este controle não usa o executor pessoal.";parent.append(note);return;}`);

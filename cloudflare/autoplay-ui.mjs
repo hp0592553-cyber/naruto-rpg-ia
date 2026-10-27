@@ -6,6 +6,7 @@ export const AUTOPLAY_HTML=String.raw`
   <button type="button" id="autoplayStop">⏹ Parar</button>
  </div>
  <p id="autoplayStatus" class="hint" role="status" aria-live="polite">Conferindo o jogador…</p>
+ <div id="autoplayCollectNotice" class="hint" aria-live="off" hidden></div>
   <details class="playerEvidence" id="autoplayEvidence">
    <summary>Estado, resultados e bloqueios</summary>
   <textarea id="autoplayGoal">Jogar Naruto Project até o nível 20.</textarea>
@@ -19,7 +20,20 @@ export const AUTOPLAY_HTML=String.raw`
 </section>`;
 export const AUTOPLAY_JS=String.raw`
 let autoplayData=null,autoplayControlBusy=false,autoplayStopBusy=false,autoplayTickBusy=false,autoplayPollingFailed=false,autoplayShownOperation=null,autoplayShownReply=null,autoplaySiteAction=null;
-let autoplayChannelRefreshBusy=false,autoplayChannelRetryAt=0;
+let autoplayChannelRefreshBusy=false,autoplayChannelRetryAt=0,autoplayTransientRetryAt=0;
+function updateCollectionStatus(){
+ const host=E("autoplayCollectNotice"),box=autoplayData?.state?.last_result?.response;
+ if(!host||!box||String(box.channel_id||"")!==String(S.current||"")||!/coleta:\s*como funciona/i.test(String(box.normalized_text||box.content||""))){if(host)host.hidden=true;return;}
+ const tick=Date.parse(box.timestamp||""),age=Number.isFinite(tick)?(Date.now()-tick)/1000:Infinity;
+ const activeControls=(box.controls||[]).filter(c=>c.custom_id&&!c.disabled);
+ let message;
+ if(activeControls.length)message="🎮 Caixa de coleta: "+activeControls.length+" controle(s) confirmado(s) pelo jogo.";
+ else if(age>=0&&age<5)message="⏱ A coleta começa em aproximadamente "+Math.max(0,Math.ceil(5-age))+" s. O jogo ainda não retornou botões nesta resposta.";
+ else if(age>=5&&age<13)message="⏱ Sequência de palavras em andamento (2 s por palavra, segundo o Naruto Bot). Atualizando o chat mais rápido; botões ainda não capturados.";
+ else message="⚠️ A instrução da coleta foi recebida, mas a resposta privada não contém botões confirmados. Não consigo clicar nesta caixa; atualizações privadas não aparecem necessariamente no histórico do canal.";
+ if(host.textContent!==message)host.textContent=message;
+ host.hidden=false;
+}
 async function refreshAutoplayChannels(action){
  if(autoplayChannelRefreshBusy||Date.now()<autoplayChannelRetryAt)return;
  autoplayChannelRefreshBusy=true;
@@ -36,7 +50,7 @@ async function refreshAutoplayChannels(action){
 }
 function renderAutoplay(data){
  if(!data?.state||autoplayData?.state?.revision>data.state.revision)return;
- autoplayData=data;const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
+ autoplayData=data;updateCollectionStatus();const s=data.state,labels={stopped:"Parado",blocked:"Bloqueado",running:"Agente ativo",waiting:"Aguardando",confirming:"Conferindo ação",paused:"Pausado",uncertain:"Resultado incerto — execução interrompida",failed:"Parou com erro",completed:"Meta confirmada"};
   const missing=(data.integration?.missing||[]).join("; ");
   E("autoplayStatus").textContent=data.integration?.configured===false?"Execução bloqueada: "+(missing||s.reason||"adaptador autorizado indisponível"):(s.phase==="stopped"?"Parado.":(labels[s.phase]||s.phase)+" · "+(s.reason||""));
   if(data.planner?.local)E("autoplayStatus").textContent+=" · piloto local por regras (IA sem cota)";
@@ -110,16 +124,25 @@ async function controlAutoplay(action,goal){
 }
 async function autoplayTick(){
  const s=autoplayData?.state;
- if(autoplayPollingFailed||autoplayTickBusy||autoplayControlBusy||autoplayStopBusy||document.visibilityState!=="visible"||!autoplayData?.integration?.configured||!["running","waiting","confirming"].includes(s?.phase)||s.next_tick_at>Date.now())return;
+ if(autoplayPollingFailed||autoplayTickBusy||autoplayControlBusy||autoplayStopBusy||document.visibilityState!=="visible"||Date.now()<autoplayTransientRetryAt||!autoplayData?.integration?.configured||!["running","waiting","confirming"].includes(s?.phase)||s.next_tick_at>Date.now())return;
  autoplayTickBusy=true;
  try{const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action:"tick",revision:s.revision})});renderAutoplay(data);}
- catch(e){await refreshAutoplay();autoplayPollingFailed=true;E("autoplayStatus").textContent="Acompanhamento interrompido: "+e.message;}
+ catch(e){
+  await refreshAutoplay();
+  const temporary=e.rateLimited||e.httpStatus>=500||/temporarily unavailable|temporariamente indispon[ií]vel|timeout|HTTP 5\d\d|Discord indispon[ií]vel/i.test(String(e.message||""));
+  if(temporary){
+   const delay=e.rateLimited?Math.max(30000,Number(e.retryAfter||30)*1000):15000;
+   autoplayTransientRetryAt=Date.now()+delay;autoplayPollingFailed=false;
+   E("autoplayStatus").textContent="Conexão temporariamente indisponível. Aguardando nova consulta, sem repetir comandos: "+e.message;
+  }else{autoplayPollingFailed=true;E("autoplayStatus").textContent="Acompanhamento interrompido: "+e.message;}
+ }
  finally{autoplayTickBusy=false;}
 }
 for(const [id,action] of [["autoplayStart","start"],["autoplayPause","pause"],["autoplayResume","resume"],["autoplayStop","stop"],["autoplayReview","review"]])E(id).onclick=async()=>{const data=await controlAutoplay(action);if(data&&["start","resume"].includes(action))await autoplayTick();};
 E("autoplayChannelCheck").onclick=async()=>{await controlAutoplay("check_channel")};
 E("autoplayRefresh").onclick=async()=>{autoplayPollingFailed=false;await refreshAutoplay()};
 setInterval(autoplayTick,1000);
+setInterval(updateCollectionStatus,1000);
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")refreshAutoplay()});
 refreshAutoplay();
 `;
