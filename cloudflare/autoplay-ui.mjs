@@ -10,6 +10,7 @@ export const AUTOPLAY_HTML=String.raw`
   <details class="playerEvidence" id="autoplayEvidence">
    <summary>Estado, resultados e bloqueios</summary>
   <textarea id="autoplayGoal">Jogar Naruto Project até o nível 20.</textarea>
+  <button type="button" id="autoplayInstruct">🎯 Enviar pedido à IA</button>
   <button id="autoplayPause">Pausar</button><button id="autoplayResume">Continuar</button>
   <button id="autoplayReview">Conferir</button><button id="autoplayChannelCheck" type="button">📍 Conferir canal</button><button id="autoplayRefresh">Atualizar</button>
    <div id="autoplayChannelStatus" class="hint" role="status" aria-live="polite">Canal ainda não verificado.</div>
@@ -122,6 +123,7 @@ function renderAutoplay(data){
  if(active&&s.site_action?.type==="channel"&&s.site_action.id!==autoplaySiteAction&&S.channels.some(c=>c.id===s.site_action.channel_id)){autoplaySiteAction=s.site_action.id;if(S.current!==s.site_action.channel_id)select(s.site_action.channel_id).catch(e=>status("Não foi possível abrir o canal: "+e.message,true));}
  if(active&&s.site_action?.type==="channel"&&s.site_action.id!==autoplaySiteAction&&!S.channels.some(c=>c.id===s.site_action.channel_id))refreshAutoplayChannels(s.site_action);
 
+ E("autoplayInstruct").disabled=autoplayControlBusy||autoplayStopBusy;
  E("autoplayStart").disabled=autoplayControlBusy||autoplayStopBusy||active;E("autoplayResume").disabled=autoplayControlBusy||autoplayStopBusy||active||!s.run_id;
  E("autoplayPause").disabled=autoplayControlBusy||["stopped","paused"].includes(s.phase);E("autoplayStop").disabled=autoplayStopBusy||(s.phase==="stopped"&&!autoplayControlBusy);
  E("autoplayReview").disabled=autoplayControlBusy||!s.pending;
@@ -164,7 +166,7 @@ async function controlAutoplay(action,goal){
    if(current.state.channel_check?.read_verified!==true)throw Error("Não consegui verificar o canal acessível. Nada foi enviado.");
   }
   requestedRevision=current.state.revision;
-  const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action,revision:current.state.revision,...(action==="start"||action==="resume"?{goal:goal||E("autoplayGoal").value,channel_id:S.current}:action==="check_channel"?{channel_id:S.current}:{})})});
+  const data=await req("/autoplay",{method:"POST",body:JSON.stringify({action,revision:current.state.revision,...(action==="start"||action==="resume"?{goal:goal||E("autoplayGoal").value,channel_id:S.current}:action==="instruct"?{goal:goal||E("autoplayGoal").value}:action==="check_channel"?{channel_id:S.current}:{})})});
   renderAutoplay(data);autoplayPollingFailed=false;return data;
  }catch(e){autoplayLogError(action+" /autoplay",e);
   if(e.rateLimited||/429|Aguarde\s+\d+\s+segundos/i.test(String(e.message||"")))autoplayTransientRetryAt=Date.now()+autoplayRetryMs(e);
@@ -190,6 +192,7 @@ async function autoplayTick(){
  finally{autoplayTickBusy=false;}
 }
 for(const [id,action] of [["autoplayStart","start"],["autoplayPause","pause"],["autoplayResume","resume"],["autoplayStop","stop"],["autoplayReview","review"]])E(id).onclick=async()=>{const data=await controlAutoplay(action);if(data&&["start","resume"].includes(action))await autoplayTick();};
+E("autoplayInstruct").onclick=async()=>{const active=["running","waiting","confirming"].includes(autoplayData?.state?.phase);const data=await controlAutoplay(active?"instruct":"start",E("autoplayGoal").value);if(data&&active)E("autoplayEvidence").open=true;if(data&&!active)await autoplayTick()};
 E("autoplayChannelCheck").onclick=async()=>{await controlAutoplay("check_channel")};
 E("autoplayRefresh").onclick=async()=>{autoplayPollingFailed=false;await refreshAutoplay()};
 setInterval(autoplayTick,1000);
@@ -201,12 +204,13 @@ export const AUTOPLAY_INTENT_JS=String.raw`
  const autoControl=/^(?:bushin[, ]*)?(?:pausa|pause|pausar)(?:\s+(?:a ia|o agente|o jogo|o rpg))?[!. ]*$/i.test(question)?"pause":
   /^(?:bushin[, ]*)?(?:para|pare|parar)(?:\s+(?:a ia|o agente|o jogo|o rpg))?[!. ]*$/i.test(question)?"stop":
   /^(?:bushin[, ]*)?(?:continua|continue|continuar|retome)(?:\s+(?:por mim|a ia|o agente|o jogo|o rpg))?[!. ]*$/i.test(question)?"resume":
-  /^(?:bushin[, ]*)?(?:joga|jogue|jogar|responde|responda|entra|entre|abre|abra|mexe|mexa)\b/i.test(question)?"start":null;
+  /^(?:bushin[, ]*)?(?:joga|jogue|jogar|responde|responda|entra|entre|abre|abra|mexe|mexa|vai|vá|use|usa|usar|ataca|atacar|faz|faça|executa|execute|consulta|consultar)\b/i.test(question)?"start":null;
  if(autoControl){
   codexChatBusy=true;E("codexSend").disabled=true;
   try{
    E("gameRoom").hidden=false;E("gameRoom").open=true;
-   const result=await controlAutoplay(autoControl,autoControl==="start"?question:undefined);
+   const effectiveAction=autoControl==="start"&&["running","waiting","confirming"].includes(autoplayData?.state?.phase)?"instruct":autoControl;
+   const result=await controlAutoplay(effectiveAction,autoControl==="start"?question:undefined);
    E("codexMessage").value="";
    E("codexChatNotice").textContent=result?"🍥 "+result.state.reason+(result.state.code?" ["+result.state.code+"]":""):"O pedido não pôde ser iniciado. Confira o estado do agente.";
    if(result&&["start","resume"].includes(autoControl))await autoplayTick();
