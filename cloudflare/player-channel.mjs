@@ -34,7 +34,7 @@ export function choosePlayerChannel({channels=[],selectedId=null,previousId=null
  const match=matchLocation(available,location);
  const selected=available.find(c=>c.id===String(selectedId));
  const previous=available.find(c=>c.id===String(previousId));
- const preferred=c=>c&&channelKind(c)!=='reference'&&channelKind(c)!=='social';
+ const preferred=c=>c&&channelKind(c)!=='reference'&&channelKind(c)!=='social'?c:null;
  const chosen=match||preferred(selected)||preferred(previous)||command;
  if(!chosen)return {channel_id:null,channel_name:null,command_channel_id:command?.id||null,source:'none',location_confirmed:false,reason:'Nenhum canal de jogo acessível foi confirmado.'};
  const source=match?'game_location':chosen===selected?'selected':chosen===previous?'previous':'commands';
