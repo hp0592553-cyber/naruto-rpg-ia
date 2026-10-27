@@ -8,7 +8,7 @@ import {COMMANDS_CHANNEL,channelText,channelKind,readableChannels,choosePlayerCh
 import {responseSnapshot} from './rpg-agent.mjs';
 const CHANNEL=COMMANDS_CHANNEL,MODEL='@cf/meta/llama-3.1-8b-instruct-fp8';
 const WORKERS_AI=MODEL;
-const kinds=/^\/(perfil ver|nivel|mapa|missoes (minhas|ativas|diarias)|viajar|acao coletar|interagir npc)$/;
+const kinds=/^\/(perfil (ver|nivel|atributos|cooldowns)|nivel|mapa|missoes (minhas|ativas|diarias|semanais)|viajar|acao coletar|interagir npc)$/;
 // Catalog traversal uses a slash joined directly to the root.
 export function playerCommands(catalog){const walk=(n,p)=>{const path=p?n.name?p+' '+n.name:p:'/'+n.name;const sub=(n.options||[]).filter(x=>[1,2].includes(x.type));return sub.length?sub.flatMap(x=>walk(x,path)):kinds.test(path)?[{command:path,description:n.description||'',options:n.options||[]}]:[]};return (catalog||[]).filter(x=>String(x.application_id)==='1515908078913192026').flatMap(x=>walk(x,''))}
 export function forestControl(controls){const key=s=>String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase();for(const c of controls||[]){if(c.disabled||c.url)continue;if(c.type===2&&key(c.label).includes('floresta'))return {control:c,values:[]};if(c.type===3){const option=c.options?.find(o=>key(o.label).includes('floresta'));if(option)return {control:c,values:[option.value]};}}return null;}
@@ -165,7 +165,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
  const credentialConfigured=typeof env.DISCORD_USER_TOKEN==='string'&&env.DISCORD_USER_TOKEN.trim().length>=35;
  const health=await commandServiceHealth(env);
  const integration={configured:credentialConfigured,mode:'personal_user_token',credential_configured:credentialConfigured,identity_verified:false,executor_online:health.online,brain_ready:health.brain_ready,personal_account_automation:true,official_game_authorization:false,code:credentialConfigured?null:'personal_session_not_configured',missing:credentialConfigured?[]:['DISCORD_USER_TOKEN: credencial da conta pessoal no Worker']};
- const view=state=>{const local=state?.brain?.provider==='local-rules',ai=state?.brain?.provider==='workers-ai';return {state,controller:'personal_player',integration,planner:{mode:local?'local-rules':ai?'workers-ai':'auto',model:state?.brain?.model||null,error:state?.brain?.error||null,local,ai,retry_at:state?.planner_retry_at||null,ai_error:state?.workers_ai_error||null},note:'Conexão pessoal solicitada pelo proprietário. Credencial configurada não comprova identidade, executor online ou jogada. Cada envio exige sua própria confirmação de resultado.'}};
+ const view=state=>{const local=state?.brain?.provider==='local-rules',ai=state?.brain?.provider==='workers-ai',opencode=state?.brain?.provider==='opencode',planning=!!state?.plan_pending;return {state,controller:'personal_player',integration,planner:{mode:planning?'opencode-pending':opencode?'opencode':local?'local-rules':ai?'workers-ai':'auto',model:state?.brain?.model||null,error:state?.brain?.error||null,local:!planning&&local,ai:!planning&&ai,opencode,planning,retry_at:state?.planner_retry_at||null,ai_error:state?.workers_ai_error||null},note:'Conexão pessoal solicitada pelo proprietário. Credencial configurada não comprova identidade, executor online ou jogada. Cada envio exige sua própria confirmação de resultado.'}};
  if(req.method==='GET')return reply(view((await readAutoplay(env,owner)).state),200,HEAD);
  if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||!req.headers.get('content-type')?.startsWith('application/json'))return reply({error:'Origem inválida'},403,HEAD);
  let data;try{const text=await req.text();if(text.length>1500)throw Error();data=JSON.parse(text)}catch{return reply({error:'Pedido inválido'},400,HEAD)}
@@ -377,7 +377,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
   const controls=(last?.controls||[]).filter(c=>!c.disabled&&!c.url&&[2,3].includes(c.type));
   // O piloto nunca troca automaticamente de canal. A escolha fica com o usuário.
   if(controls.length)available.push({command:'/component',description:'Usar somente uma das caixas da última resposta própria',options:[{name:'message_id',type:3,required:true},{name:'custom_id',type:3,required:true},{name:'values',type:3,required:true}]});
-  const seed=!saved.state.refresh_observation&&['/perfil ver','/nivel','/missoes minhas','/missoes ativas'].find(x=>!saved.state.completed_keys.includes(x)&&available.some(c=>c.command===x));
+  const seed=!(executorHealth.brain_ready&&!plannerOffline)&&!saved.state.refresh_observation&&['/perfil ver','/perfil nivel','/nivel','/missoes minhas','/missoes ativas'].find(x=>!saved.state.completed_keys.includes(x)&&available.some(c=>c.command===x));
   let selected=seed?{command:seed,options:{},channel_id:CHANNEL,provider:'rules-seed',model:'catalog-v1'}:null;
   let channels=[{id:CHANNEL,name:'Comandos',type:0}],workersAiError=null;
   if(!selected){
@@ -401,7 +401,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
    else{
     const local=()=>rulePlan({available,observations:context,uncertain:saved.state.uncertain_actions||[],contextChannel,channels,gate,refused,visitedChannels:saved.state.visited_channels||[]});
     if(saved.state.plan_decision?.command&&saved.state.plan_decision.command!=='/navigate')selected=saved.state.plan_decision;
-    else if(plannerOffline||env.BUSHIN_AI?.run){
+    else if(plannerOffline||!executorHealth.brain_ready){
      let aiError=null;
      if(env.BUSHIN_AI?.run&&Date.now()>=(saved.state.workers_ai_retry_at||0)){
       const outcome=await workersAiPlan(env,{available,observations:context,uncertain:saved.state.uncertain_actions||[],channels,contextChannel,last,goal:saved.state.goal,location:saved.state.snapshot?.location});
@@ -420,7 +420,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
       const next=await commit(d=>{d.brain={provider:'local-rules',model:'catalog-v1',error:'planner_request_failed'};d.planner_retry_at=Date.now()+600000;d.reason='Plano indisponível ('+String(e.message).slice(0,80)+'). Sigo com regras locais verificadas.';d.next_tick_at=Date.now()+500;recordAutoplay(d,'planner_error',String(e.message).slice(0,160));return d});
       return reply(view(next.state),200,HEAD);
      }
-     const next=await commit(d=>{d.plan_pending=queued.request_id;d.phase='waiting';d.reason='Enviando contexto ao OpenCode.';d.next_tick_at=Date.now()+2000});return reply(view(next.state),200,HEAD);
+     const next=await commit(d=>{d.plan_pending=queued.request_id;d.phase='waiting';d.reason='Contexto e objetivo enviados ao OpenCode. Aguardando decisão da IA.';d.next_tick_at=Date.now()+2000;recordAutoplay(d,'planner_queued','OpenCode recebeu solicitação de plano. Ainda não há ação executada.');return d});return reply(view(next.state),200,HEAD);
     }
     if(!selected?.command)throw Error(String(selected?.reason||'Não encontrei uma próxima ação verificável.').slice(0,300));
    }
