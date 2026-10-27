@@ -90,7 +90,17 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p dist/diagnostics
-          node --test --test-reporter=tap cloudflare/tests/*.test.mjs > dist/diagnostics/unit-tests.tap 2>&1 || { tail -n 100 dist/diagnostics/unit-tests.tap; exit 1; }
+          if ! node --test --test-reporter=tap cloudflare/tests/*.test.mjs > dist/diagnostics/unit-tests.tap 2>&1; then
+            python3 - <<'PY'
+          from pathlib import Path
+          lines = Path('dist/diagnostics/unit-tests.tap').read_text(errors='replace').splitlines()
+          for i, line in enumerate(lines):
+              if line.startswith('not ok '):
+                  print('\n'.join(lines[i:min(i+33,len(lines))]))
+          print('\n'.join(lines[-12:]))
+          PY
+            exit 1
+          fi
           tail -n 30 dist/diagnostics/unit-tests.tap
       - name: Testar Jogar por mim, Parar, mensagens, limites e botoes sem Discord real
         run: |
