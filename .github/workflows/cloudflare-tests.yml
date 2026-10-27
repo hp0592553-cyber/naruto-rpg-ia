@@ -1,11 +1,8 @@
 name: Bushin Worker checks
 on:
   workflow_dispatch:
-  push:
-    branches: [Projeto]
-    paths: ['cloudflare/**', 'scripts/command_service.py', 'scripts/opencode_planner.py', 'scripts/test_command_service.py', 'tests/test_opencode_planner.py', '.github/workflows/cloudflare-tests.yml']
-  pull_request:
-    paths: ['cloudflare/**', '.github/workflows/cloudflare-tests.yml']
+# Workflow legado mantido para execucao manual.
+# Na branch Projeto, CI, HTML e deploy sao coordenados pelo bushin-cloudflare-ci.yml.
 permissions:
   contents: read
 jobs:
