@@ -50,6 +50,30 @@ export async function workersAiChatReply(env,{conversation=[],target={}}){
   return replyText(raw,target);
  }catch{return null;}
 }
+/** On-demand reply draft for an explicitly selected real message. Does not send. */
+export async function playerChatDraftRoute(req,env,ctx,{reply,baseUrl,readChat=personalCall}){
+ const HEAD={'cache-control':'no-store'};
+ const owner=String(ctx.me?.id||'');
+ if(owner!==String(env.BUSHIN_OWNER_DISCORD_ID)||ctx.me?.membership?.member!==true)return reply({error:'Conta não autorizada.'},403,HEAD);
+ if(req.method!=='POST'||req.headers.get('origin')!==baseUrl||!req.headers.get('content-type')?.startsWith('application/json'))return reply({error:'Requisição inválida.'},403,HEAD);
+ let data;try{data=await req.json()}catch{return reply({error:'JSON inválido.'},400,HEAD)}
+ const channel_id=String(data.channel_id||''),message_id=String(data.message_id||'');
+ if(!/^\d{15,22}$/.test(channel_id)||!/^\d{15,22}$/.test(message_id))return reply({error:'Canal ou mensagem inválidos.'},400,HEAD);
+ if(!env.BUSHIN_AI?.run)return reply({error:'O Llama no Worker está indisponível; nenhuma mensagem enviada.'},503,HEAD);
+ // "before" is exclusive. An ID+1 cursor retrieves this exact message and its predecessors,
+ // even when the user has loaded a very old page of the channel.
+ const before=(BigInt(message_id)+1n).toString();
+ const history=await readChat(env,'bushin_naruto_personal_read',{channel_id,limit:12,before},ctx);
+ if(!history?.read)return reply({error:history?.reason||'Histórico indisponível.',retry_after_seconds:history?.retry_after_seconds||null},history?.code===429?429:503,HEAD);
+ const target=(history.messages||[]).find(m=>String(m.id)===message_id);
+ if(!target||target.author_id===owner||!/^\d{15,22}$/.test(String(target.author_id||'')))return reply({error:'Mensagem original não confirmada ou é sua; nada foi enviado.'},404,HEAD);
+ const answer=await workersAiChatReply(env,{conversation:chatContext(history.messages),target});
+ if(!answer)return reply({error:'O Llama não gerou uma resposta válida. Nenhuma mensagem enviada.'},503,HEAD);
+ // The composer handles the reply reference; an explicit mention is unnecessary.
+ const text=answer.replace(new RegExp('^<@'+target.author_id+'>\\s*'),'').trim();
+ return reply({state:'completed',channel_id,message_id,author_id:target.author_id,text,sent:false,model:WORKERS_AI},200,HEAD);
+}
+
 export async function workersAiPlan(env,{available=[],observations=[],channels=[],contextChannel=CHANNEL,last=null,goal=''}){
  if(!env.BUSHIN_AI||typeof env.BUSHIN_AI.run!=='function')return {error:'workers_ai_unavailable'};
  const usable=available.filter(c=>!c.options?.some(o=>o.required)).slice(0,18);
@@ -285,7 +309,7 @@ export async function playerRoute(req,env,ctx,{reply,baseUrl,seal,unseal,readCha
       if(outcome.plan)selected=outcome.plan;else aiError=outcome.error||'no_action';
      }
      if(!selected){selected=local();workersAiError=aiError}
-     if(!selected)throw Error('IA sem cota e nenhuma nova ação verificável neste canal. Nada foi enviado; pause ou aguarde a cota do modelo.');
+     if(!selected){const next=await commit(d=>{d.phase='waiting';d.code=null;d.brain={provider:'local-rules',model:'catalog-v1',error:aiError||'no_verified_action'};d.workers_ai_error=aiError||'no_verified_action';d.workers_ai_retry_at=Date.now()+120000;d.reason='Sem nova ação de RPG verificável neste canal. Continuo acompanhando novas mensagens, sem enviar comandos repetidos.';d.next_tick_at=Date.now()+30000;return d});return reply(view(next.state),200,HEAD);}
     }
     else{
      const planningContext=JSON.stringify({learned_rules:learned.evidence,conversation,context_channel_id:contextChannel,observations:context,commands:available,channels,last_response:last?{message_id:last.message_id,channel_id:last.channel_id,controls}:null});
