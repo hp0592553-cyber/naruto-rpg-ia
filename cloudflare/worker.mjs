@@ -25,7 +25,7 @@ import {commandServiceSelected,commandServiceMobile,commandServiceRunner,startCo
 import {agentRoute,recordCommandEvidence} from "./rpg-agent.mjs";
 import {gameRoomRoute} from "./game-room.mjs";
 import {autoplayRoute,scheduledAutoplay} from "./autoplay.mjs";
-import {playerRoute} from "./player-loop.mjs";
+import {playerRoute,playerChatDraftRoute} from "./player-loop.mjs";
 import {normalizeMessage} from "./message-normalizer.mjs";
 import {bushinAiNext} from "./discord2-ai.mjs";
 import {codexBridgeMobile,codexBridgeAgent} from "./codex-bridge.mjs";
@@ -923,6 +923,7 @@ export default {
         if(path==="/mobile/discord2/api/search/mine"&&req.method==="POST")return await searchHenriqueMessages(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/ai/scan"&&req.method==="POST")return await scanRpgChannels(req,env,ctx,{reply,personalCall,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/autoplay/authorized")return autoplayRoute(req,env,ctx,{reply,baseUrl:base(env)});
+        if(path==="/mobile/discord2/api/ai/chat-draft")return playerChatDraftRoute(req,env,ctx,{reply,baseUrl:base(env)});
         if(path==="/mobile/discord2/api/autoplay")return playerRoute(req,env,ctx,{reply,baseUrl:base(env),seal,unseal,listChannels:async()=>{
           // Read membership again after travel; the initial mobile session is not a role snapshot.
           const auth=await unseal(row.creds_encrypted,env);
@@ -1052,7 +1053,7 @@ export default {
           if(req.method==="GET"){
             const u=new URL(req.url),before=u.searchParams.get("before")||undefined;
             if(before&&!/^[0-9]{15,22}$/.test(before))return reply({error:"Cursor inválido"},400,headers);
-            const r=await personalCall(env,"bushin_naruto_personal_read",{channel_id,limit:12,...(before?{before}:{})},ctx);
+            const r=await personalCall(env,"bushin_naruto_personal_read",{channel_id,limit:50,...(before?{before}:{})},ctx);
             return reply(r,r.read?200:503,headers);
           }
           if(req.method==="POST"){

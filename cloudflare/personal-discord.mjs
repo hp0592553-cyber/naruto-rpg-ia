@@ -17,8 +17,8 @@ export const PERSONAL_TOOLS=[
    description:"Verifica se a Secret DISCORD_USER_TOKEN foi configurada; não revela nem usa o token neste teste.",
    inputSchema:{type:"object",properties:{},additionalProperties:false},annotations:readOnly},
   {name:"bushin_naruto_personal_read",title:"🍥 Ler canal Naruto com sessão pessoal",
-   description:"Usa a Secret configurada pelo dono para ler no máximo 12 mensagens de um canal validado do Naruto Project.",
-   inputSchema:{type:"object",properties:{channel_id:{type:"string",pattern:"^[0-9]{15,22}$"},limit:{type:"integer",minimum:1,maximum:12},before:{type:"string",pattern:"^[0-9]{15,22}$"}},required:["channel_id"],additionalProperties:false},annotations:readOnly},
+   description:"Usa a Secret configurada pelo dono para ler até 50 mensagens por página de um canal validado do Naruto Project.",
+   inputSchema:{type:"object",properties:{channel_id:{type:"string",pattern:"^[0-9]{15,22}$"},limit:{type:"integer",minimum:1,maximum:50},before:{type:"string",pattern:"^[0-9]{15,22}$"}},required:["channel_id"],additionalProperties:false},annotations:readOnly},
   {name:"bushin_naruto_personal_send",title:"🍥 Enviar mensagem Naruto com sessão pessoal",
    description:"Envia somente mensagem aprovada, em canal validado do Naruto Project, usando a Secret pessoal. Discord não permite self-bots.",
    inputSchema:{type:"object",properties:{channel_id:{type:"string",pattern:"^[0-9]{15,22}$"},text:{type:"string",minLength:1,maxLength:500},confirmed:{type:"boolean"}},required:["channel_id","text","confirmed"],additionalProperties:false},
@@ -107,7 +107,7 @@ export async function personalCall(env,name,args={},ctx={}){
  const access=await checkChannel(token,args.channel_id);
  if(access.state!=="completed")return {...access,read:false,sent:false};
  if(name==="bushin_naruto_personal_read"){
-   const limit=Number.isInteger(args.limit)?Math.max(1,Math.min(12,args.limit)):8;
+   const limit=Number.isInteger(args.limit)?Math.max(1,Math.min(50,args.limit)):12;
    const r=await request(token,"/channels/"+args.channel_id+"/messages?limit="+limit+(args.before?"&before="+encodeURIComponent(args.before):""));
    if(r.state!=="completed")return {...r,read:false};
    if(!Array.isArray(r.data))return {state:"unavailable",reason:"Resposta inesperada do Discord.",read:false};
